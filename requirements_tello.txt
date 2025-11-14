@@ -1,0 +1,24 @@
+# Dépendances pour le face tracking avec drone Tello
+# Installation: pip install -r requirements_tello.txt
+
+# Bibliothèque pour contrôler le drone DJI Tello
+djitellopy>=2.5.0
+
+# OpenCV pour le traitement d'images (déjà dans requirements.txt mais spécifié ici pour clarté)
+opencv-python>=4.6.0
+
+# NumPy pour les calculs (déjà dans requirements.txt)
+numpy>=1.18.5
+
+# PyTorch pour YOLO (version CPU recommandée pour laptop sans GPU)
+# Pour CPU uniquement:
+torch>=1.7.0,<2.0.0
+torchvision>=0.8.1,<0.15.0
+
+# Ultralytics YOLO (installer depuis le projet local)
+# Si le projet est installé en mode développement:
+# pip install -e .
+
+# Ou installer ultralytics depuis PyPI:
+# ultralytics>=8.0.0
+
