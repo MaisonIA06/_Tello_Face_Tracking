@@ -8,12 +8,15 @@ djitellopy>=2.5.0
 opencv-python>=4.6.0
 
 # NumPy pour les calculs (déjà dans requirements.txt)
-numpy>=1.18.5
+numpy>=1.18.5,<2.0.0
 
 # PyTorch pour YOLO (version CPU recommandée pour laptop sans GPU)
 # Pour CPU uniquement:
-torch>=1.7.0,<2.0.0
-torchvision>=0.8.1,<0.15.0
+torch==2.2.0
+torchvision==0.17.0
+
+# Omegaconf (requis pour les anciens modèles YOLO)
+omegaconf>=2.1.0
 
 # Ultralytics YOLO (installer depuis le projet local)
 # Si le projet est installé en mode développement:
