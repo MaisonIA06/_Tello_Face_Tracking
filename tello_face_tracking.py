@@ -361,12 +361,18 @@ class FaceTracker:
         self.last_error_x = 0
         self.last_error_y = 0
         
-        # Vitesse maximale du drone - réduites pour des mouvements plus doux
-        self.max_speed_yaw = 25      # deg/s pour la rotation (réduit de 50 à 25)
-        self.max_speed_vertical = 20  # cm/s pour le mouvement vertical (réduit de 30 à 20)
+        # Vitesse maximale du drone - augmentées pour des mouvements plus rapides
+        self.max_speed_yaw = 30      # deg/s pour la rotation
+        self.max_speed_vertical = 30  # cm/s pour le mouvement vertical
+        self.max_speed_horizontal = 40  # cm/s pour le mouvement latéral (gauche/droite) - augmenté
+        self.max_speed_forward = 50     # cm/s pour le mouvement avant/arrière - augmenté significativement
         
         # Zone morte (dead zone) pour éviter les micro-mouvements - augmentée
         self.dead_zone = 40  # pixels (augmenté de 20 à 40 pour réduire les micro-corrections)
+        
+        # Taille cible du visage (en pixels) pour le contrôle avant/arrière
+        self.target_face_size = 150  # Taille cible du visage en pixels (ajustable)
+        self.face_size_tolerance = 30  # Tolérance autour de la taille cible
         
         # Compteur de frames sans détection
         self.no_detection_count = 0
@@ -393,7 +399,6 @@ class FaceTracker:
             if frame is not None:
                 if not hasattr(self, 'last_frame_hash'):
                     self.last_frame_hash = hash(frame.tobytes())
-                    # Le Tello renvoie des frames en BGR
                     return frame
                 
                 current_frame_hash = hash(frame.tobytes())
@@ -449,27 +454,33 @@ class FaceTracker:
         
         return None
     
-    def calculate_control(self, face_center: Tuple[int, int]) -> Tuple[int, int]:
+    def calculate_control(self, face_info: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
         Calcule les commandes de contrôle du drone pour centrer le visage.
         
         Args:
-            face_center: Tuple (x, y) du centre du visage détecté
+            face_info: Tuple (x_center, y_center, width, height) du visage détecté
             
         Returns:
-            Tuple (velocity_x, velocity_y) en cm/s pour le contrôle du drone
+            Tuple (left_right, forward_backward, up_down, yaw) en cm/s ou deg/s
         """
-        face_x, face_y = face_center
+        x_center, y_center, width, height = face_info
         
         # Calcul de l'erreur (différence entre le centre du visage et le centre de l'image)
-        error_x = face_x - self.center_x
-        error_y = face_y - self.center_y
+        error_x = x_center - self.center_x
+        error_y = y_center - self.center_y
+        
+        # Calcul de la taille du visage (utiliser la moyenne de width et height)
+        face_size = (width + height) / 2
+        error_size = face_size - self.target_face_size
         
         # Application de la zone morte
         if abs(error_x) < self.dead_zone:
             error_x = 0
         if abs(error_y) < self.dead_zone:
             error_y = 0
+        if abs(error_size) < self.face_size_tolerance:
+            error_size = 0
         
         # Détection d'oscillations : si l'erreur change de signe rapidement, réduire la réactivité
         oscillation_x = (error_x * self.last_error_x < 0) if self.last_error_x != 0 else False
@@ -478,40 +489,49 @@ class FaceTracker:
         # Facteur de réduction si oscillation détectée
         damping_factor = 0.5 if (oscillation_x or oscillation_y) else 1.0
         
-        # Contrôle PID simplifié (sans terme intégral pour éviter l'instabilité)
-        # Terme proportionnel
+        # Contrôle PID pour le mouvement horizontal (gauche/droite)
         p_x = self.kp_x * error_x * damping_factor
-        p_y = self.kp_y * error_y * damping_factor
-        
-        # Terme dérivé
         d_x = self.kd_x * (error_x - self.last_error_x)
-        d_y = self.kd_y * (error_y - self.last_error_y)
+        left_right = int(p_x + d_x)
         
-        # Commande totale
-        velocity_x = int(p_x + d_x)
-        velocity_y = int(p_y + d_y)
+        # Contrôle PID pour le mouvement vertical (monter/descendre)
+        p_y = self.kp_y * error_y * damping_factor
+        d_y = self.kd_y * (error_y - self.last_error_y)
+        up_down = int(p_y + d_y)
+        
+        # Contrôle pour le mouvement avant/arrière basé sur la taille du visage
+        # Si le visage est trop petit, avancer. Si trop grand, reculer.
+        # Coefficient augmenté pour des mouvements plus rapides
+        forward_backward = int(-error_size * 0.4)  # Coefficient augmenté de 0.1 à 0.4 pour plus de réactivité
+        
+        # Rotation (yaw) - utiliser seulement si le mouvement latéral n'est pas suffisant
+        # Réduire le yaw si on utilise le mouvement latéral
+        yaw = int(left_right * 0.3) if abs(error_x) > self.dead_zone * 2 else 0
         
         # Réduction supplémentaire si l'erreur est petite (approche du centre)
         if abs(error_x) < self.dead_zone * 2:
-            velocity_x = int(velocity_x * 0.6)  # Réduire de 40% quand proche du centre
+            left_right = int(left_right * 0.6)
+            yaw = int(yaw * 0.6)
         if abs(error_y) < self.dead_zone * 2:
-            velocity_y = int(velocity_y * 0.6)  # Réduire de 40% quand proche du centre
+            up_down = int(up_down * 0.6)
+        # Réduction moins importante pour le mouvement avant/arrière pour garder la réactivité
+        if abs(error_size) < self.face_size_tolerance * 2:
+            forward_backward = int(forward_backward * 0.8)  # Réduction réduite de 0.6 à 0.8
         
-        # Limitation de la vitesse
-        # velocity_x est pour le yaw (rotation) en deg/s
-        # velocity_y est pour le mouvement vertical en cm/s
-        # Conversion explicite en int Python (np.clip retourne numpy.int64)
-        velocity_x = int(np.clip(velocity_x, -self.max_speed_yaw, self.max_speed_yaw))
-        velocity_y = int(np.clip(velocity_y, -self.max_speed_vertical, self.max_speed_vertical))
+        # Limitation des vitesses
+        left_right = int(np.clip(left_right, -self.max_speed_horizontal, self.max_speed_horizontal))
+        forward_backward = int(np.clip(forward_backward, -self.max_speed_forward, self.max_speed_forward))
+        up_down = int(np.clip(up_down, -self.max_speed_vertical, self.max_speed_vertical))
+        yaw = int(np.clip(yaw, -self.max_speed_yaw, self.max_speed_yaw))
         
         # Mise à jour des erreurs précédentes
         self.last_error_x = error_x
         self.last_error_y = error_y
         
-        return (velocity_x, velocity_y)
+        return (left_right, forward_backward, up_down, yaw)
     
     def draw_overlay(self, frame: np.ndarray, face_info: Optional[Tuple], 
-                     velocity: Tuple[int, int]) -> np.ndarray:
+                     velocity: Tuple[int, int, int, int]) -> np.ndarray:
         """
         Dessine les informations de tracking sur la frame.
         
@@ -566,11 +586,13 @@ class FaceTracker:
                        1, (0, 0, 255), 2)
         
         # Affichage des informations de contrôle
-        vx, vy = velocity
+        left_right, forward_backward, up_down, yaw = velocity
         info_text = [
             f"FPS: {self.fps:.1f}",
-            f"Yaw: {vx} deg/s",
-            f"Up/Down: {-vy} cm/s",
+            f"Gauche/Droite: {left_right} cm/s",
+            f"Avant/Arriere: {forward_backward} cm/s",
+            f"Monter/Descendre: {-up_down} cm/s",
+            f"Rotation: {yaw} deg/s",
             f"Batterie: {self.tello.get_battery()}%"
         ]
         
@@ -618,12 +640,12 @@ class FaceTracker:
                 
                 # Calcul des commandes de contrôle
                 if face_info is not None:
-                    x_center, y_center, _, _, _ = face_info
-                    velocity_x, velocity_y = self.calculate_control((x_center, y_center))
+                    x_center, y_center, width, height, _ = face_info
+                    left_right, forward_backward, up_down, yaw = self.calculate_control((x_center, y_center, width, height))
                     self.no_detection_count = 0
                 else:
                     # Aucun visage détecté - arrêter le mouvement
-                    velocity_x, velocity_y = 0, 0
+                    left_right, forward_backward, up_down, yaw = 0, 0, 0, 0
                     self.no_detection_count += 1
                     
                     # Si aucun visage détecté pendant trop longtemps, atterrir
@@ -643,24 +665,24 @@ class FaceTracker:
                     # yaw_velocity: rotation (deg/s), positif = tourner à droite
                     
                     # Pour centrer le visage:
-                    # - Horizontal: utiliser yaw (rotation) pour tourner vers le visage
-                    # - Vertical: utiliser up_down pour monter/descendre
+                    # - Horizontal: mouvement latéral (gauche/droite) + rotation légère
+                    # - Vertical: monter/descendre
+                    # - Distance: avancer/reculer selon la taille du visage
                     self.rc_command_counter += 1
                     if self.rc_command_counter >= self.rc_command_interval:
-                        print(f"Envoi de la commande RC: {velocity_x}, {velocity_y}")
-                        if velocity_x != 0 or velocity_y != 0:
+                        if left_right != 0 or forward_backward != 0 or up_down != 0 or yaw != 0:
                             self.tello.send_rc_control(
-                                left_right_velocity=0,           # Pas de mouvement latéral
-                                forward_backward_velocity=0,     # Pas de mouvement avant/arrière
-                                up_down_velocity=-velocity_y,     # Mouvement vertical (inversé: visage en haut = descendre)
-                                yaw_velocity=velocity_x          # Rotation pour centrer horizontalement
+                                left_right_velocity=left_right,      # Mouvement latéral (gauche/droite)
+                                forward_backward_velocity=forward_backward,  # Avancer/reculer
+                                up_down_velocity=-up_down,          # Mouvement vertical (inversé: visage en haut = descendre)
+                                yaw_velocity=yaw                     # Rotation légère pour ajustement fin
                             )
                             self.rc_command_counter = 0
                     #else:
                     #    self.tello.send_rc_control(0, 0, 0, 0)
                 
                 # Dessin de l'overlay
-                frame = self.draw_overlay(frame, face_info, (velocity_x, velocity_y))
+                frame = self.draw_overlay(frame, face_info, (left_right, forward_backward, up_down, yaw))
                 
                 # Affichage de la frame
                 cv2.imshow("Tello Face Tracking", frame)
