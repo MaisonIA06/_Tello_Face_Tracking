@@ -39,11 +39,37 @@ Assurez-vous que le fichier `yolov8n-face.pt` est présent dans le répertoire d
 
 ## 📱 Configuration du Drone Tello
 
-### 1. Connexion WiFi
+### 1. Connexion WiFi (Automatique)
 
-1. Allumez le drone Tello
-2. Connectez votre ordinateur au réseau WiFi du Tello (généralement nommé "TELLO-XXXXXX")
-3. Attendez que la connexion soit établie
+**✨ Nouvelle fonctionnalité :** Le script gère maintenant automatiquement la connexion WiFi au drone Tello !
+
+Le script peut :
+- Détecter automatiquement le réseau WiFi du Tello
+- Se connecter automatiquement au réseau
+- Restaurer votre connexion WiFi précédente après utilisation
+
+**Prérequis pour la gestion automatique :**
+- NetworkManager doit être installé (généralement déjà présent sur Linux)
+- Si ce n'est pas le cas : `sudo apt-get install network-manager`
+
+**Utilisation :**
+
+1. **Mode automatique (par défaut)** : Le script se connecte automatiquement au réseau Tello
+   ```bash
+   python tello_face_tracking.py
+   ```
+
+2. **Désactiver la gestion automatique** : Si vous préférez vous connecter manuellement
+   ```bash
+   python tello_face_tracking.py --no-auto-wifi
+   ```
+
+3. **Spécifier le SSID du Tello** : Si vous connaissez le nom exact du réseau
+   ```bash
+   python tello_face_tracking.py --tello-ssid "TELLO-XXXXXX"
+   ```
+
+**Note :** Si la connexion automatique échoue, le script vous demandera si vous souhaitez continuer (utile si vous êtes déjà connecté manuellement).
 
 ### 2. Vérification de la batterie
 
@@ -68,14 +94,33 @@ Appuyez sur `q` pour quitter le test.
 
 ### Lancement du script de tracking
 
+**Utilisation de base :**
 ```bash
 python tello_face_tracking.py
 ```
 
-Ou avec un modèle personnalisé:
+**Options disponibles :**
 
 ```bash
-python tello_face_tracking.py yolov11n-face.pt
+# Spécifier un modèle personnalisé
+python tello_face_tracking.py --model yolov11n-face.pt
+
+# Ajuster le seuil de confiance
+python tello_face_tracking.py --conf 0.3
+
+# Désactiver la gestion Wi-Fi automatique
+python tello_face_tracking.py --no-auto-wifi
+
+# Spécifier le SSID du Tello
+python tello_face_tracking.py --tello-ssid "TELLO-XXXXXX"
+
+# Combinaison d'options
+python tello_face_tracking.py --model yolov11n-face.pt --conf 0.3
+```
+
+**Aide complète :**
+```bash
+python tello_face_tracking.py --help
 ```
 
 ### Contrôles
@@ -132,9 +177,29 @@ tracker = FaceTracker(model_path=model_path, conf_threshold=0.25)
 
 ### Le drone ne se connecte pas
 
+**Problèmes de connexion Wi-Fi automatique :**
+
+1. **NetworkManager non disponible**
+   ```bash
+   sudo apt-get install network-manager
+   ```
+
+2. **Le réseau Tello n'est pas détecté**
+   - Assurez-vous que le drone est allumé et en mode Wi-Fi
+   - Vérifiez que le drone est à proximité (moins de 10 mètres)
+   - Essayez de spécifier manuellement le SSID : `--tello-ssid "TELLO-XXXXXX"`
+   - Désactivez la gestion automatique : `--no-auto-wifi` et connectez-vous manuellement
+
+3. **Permissions insuffisantes**
+   - La gestion Wi-Fi nécessite parfois des permissions système
+   - Si cela échoue, utilisez `--no-auto-wifi` et connectez-vous manuellement
+
+**Problèmes généraux :**
+
 - Vérifiez que vous êtes bien connecté au WiFi du Tello
 - Assurez-vous que le drone est allumé et que les LED clignotent
 - Essayez de redémarrer le drone et votre ordinateur
+- Vérifiez que le firewall ne bloque pas la communication avec le drone
 
 ### Détection de visage instable
 

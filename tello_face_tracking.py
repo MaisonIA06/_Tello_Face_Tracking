@@ -12,6 +12,9 @@ import time
 from typing import Optional, Tuple
 import sys
 import os
+import subprocess
+
+os.environ['QT_QPA_PLATFORM'] = 'xcb'
 
 # Import de YOLO depuis ultralytics
 try:
@@ -30,24 +33,294 @@ except ImportError:
     sys.exit(1)
 
 
+class TelloWiFiManager:
+    """
+    Gestionnaire Wi-Fi automatique pour se connecter au drone Tello.
+    Détecte et se connecte automatiquement au réseau Wi-Fi du Tello,
+    puis restaure la connexion précédente après utilisation.
+    """
+    
+    def __init__(self, tello_ssid_pattern: str = "TELLO"):
+        """
+        Initialise le gestionnaire Wi-Fi.
+        
+        Args:
+            tello_ssid_pattern: Motif pour identifier le réseau Tello (par défaut: "TELLO")
+        """
+        self.tello_ssid_pattern = tello_ssid_pattern.upper()
+        self.original_connection = None
+        self.tello_ssid = None
+        self.is_connected_to_tello = False
+        
+    def check_network_manager(self) -> bool:
+        """
+        Vérifie si NetworkManager (nmcli) est disponible.
+        
+        Returns:
+            True si nmcli est disponible, False sinon
+        """
+        try:
+            result = subprocess.run(
+                ['which', 'nmcli'],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            return result.returncode == 0
+        except:
+            return False
+    
+    def get_current_connection(self) -> Optional[str]:
+        """
+        Récupère le nom de la connexion Wi-Fi actuelle.
+        
+        Returns:
+            Nom de la connexion actuelle ou None
+        """
+        try:
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'NAME,DEVICE,TYPE', 'connection', 'show', '--active'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            for line in result.stdout.strip().split('\n'):
+                if line and 'wifi' in line.lower():
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        return parts[0]
+            return None
+        except subprocess.CalledProcessError:
+            return None
+        except Exception as e:
+            print(f"Erreur lors de la récupération de la connexion actuelle: {e}")
+            return None
+    
+    def scan_for_tello(self, timeout: int = 30) -> Optional[str]:
+        """
+        Scanne les réseaux Wi-Fi disponibles pour trouver le Tello.
+        
+        Args:
+            timeout: Temps maximum d'attente en secondes
+            
+        Returns:
+            SSID du réseau Tello trouvé ou None
+        """
+        print(f"Recherche du réseau Tello (motif: {self.tello_ssid_pattern})...")
+        print("Assurez-vous que le drone Tello est allumé et en mode Wi-Fi.")
+        
+        start_time = time.time()
+        attempts = 0
+        max_attempts = timeout // 5
+        
+        while time.time() - start_time < timeout:
+            attempts += 1
+            print(f"Tentative {attempts}/{max_attempts}...")
+            
+            try:
+                # Scanner les réseaux Wi-Fi
+                result = subprocess.run(
+                    ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'device', 'wifi', 'list'],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=10
+                )
+                
+                # Chercher le réseau Tello
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        parts = line.split(':')
+                        if len(parts) >= 1:
+                            ssid = parts[0].strip()
+                            if self.tello_ssid_pattern in ssid.upper():
+                                print(f"✓ Réseau Tello trouvé: {ssid}")
+                                return ssid
+                
+                time.sleep(5)
+                
+            except subprocess.TimeoutExpired:
+                print("Timeout lors du scan, nouvelle tentative...")
+                continue
+            except subprocess.CalledProcessError as e:
+                print(f"Erreur lors du scan: {e}")
+                time.sleep(5)
+                continue
+            except Exception as e:
+                print(f"Erreur inattendue: {e}")
+                time.sleep(5)
+                continue
+        
+        print("✗ Réseau Tello non trouvé après le timeout.")
+        return None
+    
+    def connect_to_tello(self, ssid: Optional[str] = None) -> bool:
+        """
+        Se connecte au réseau Wi-Fi du Tello.
+        
+        Args:
+            ssid: SSID du réseau Tello (si None, scanne d'abord)
+            
+        Returns:
+            True si la connexion réussit, False sinon
+        """
+        if not self.check_network_manager():
+            print("✗ Erreur: NetworkManager (nmcli) n'est pas disponible.")
+            print("  Installez NetworkManager avec: sudo apt-get install network-manager")
+            return False
+        
+        # Sauvegarder la connexion actuelle
+        self.original_connection = self.get_current_connection()
+        if self.original_connection:
+            print(f"Connexion actuelle sauvegardée: {self.original_connection}")
+        
+        # Trouver le SSID du Tello si non fourni
+        if ssid is None:
+            ssid = self.scan_for_tello()
+            if ssid is None:
+                return False
+        
+        self.tello_ssid = ssid
+        
+        # Se connecter au réseau Tello
+        print(f"Connexion au réseau {ssid}...")
+        try:
+            # Essayer de se connecter au réseau
+            result = subprocess.run(
+                ['nmcli', 'device', 'wifi', 'connect', ssid],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                # Attendre que la connexion soit établie
+                print("Attente de l'établissement de la connexion...")
+                time.sleep(5)
+                
+                # Vérifier la connexion
+                current = self.get_current_connection()
+                if current and ssid in current:
+                    print(f"✓ Connecté au réseau {ssid}")
+                    self.is_connected_to_tello = True
+                    return True
+                else:
+                    print("✗ La connexion n'a pas pu être établie.")
+                    return False
+            else:
+                print(f"✗ Erreur lors de la connexion: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print("✗ Timeout lors de la connexion.")
+            return False
+        except Exception as e:
+            print(f"✗ Erreur lors de la connexion: {e}")
+            return False
+    
+    def restore_connection(self) -> bool:
+        """
+        Restaure la connexion Wi-Fi précédente.
+        
+        Returns:
+            True si la restauration réussit, False sinon
+        """
+        if not self.is_connected_to_tello:
+            return True  # Rien à restaurer
+        
+        if self.original_connection is None:
+            print("Aucune connexion précédente à restaurer.")
+            return True
+        
+        print(f"Restauration de la connexion: {self.original_connection}...")
+        
+        try:
+            result = subprocess.run(
+                ['nmcli', 'connection', 'up', self.original_connection],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                print(f"✓ Connexion restaurée: {self.original_connection}")
+                self.is_connected_to_tello = False
+                return True
+            else:
+                print(f"✗ Erreur lors de la restauration: {result.stderr}")
+                print("  Vous devrez peut-être vous reconnecter manuellement.")
+                return False
+                
+        except Exception as e:
+            print(f"✗ Erreur lors de la restauration: {e}")
+            return False
+    
+    def auto_connect(self) -> bool:
+        """
+        Méthode principale pour se connecter automatiquement au Tello.
+        Scanne, se connecte et sauvegarde l'état.
+        
+        Returns:
+            True si la connexion réussit, False sinon
+        """
+        return self.connect_to_tello()
+    
+    def cleanup(self):
+        """
+        Nettoie et restaure la connexion précédente.
+        """
+        if self.is_connected_to_tello:
+            self.restore_connection()
+
+
 class FaceTracker:
     """
     Classe principale pour le tracking de visage avec le drone Tello.
     """
     
-    def __init__(self, model_path: str = "yolov8n-face.pt", conf_threshold: float = 0.25):
+    def __init__(self, model_path: str = "yolov8n-face.pt", conf_threshold: float = 0.25, 
+                 auto_wifi: bool = True, tello_ssid: Optional[str] = None):
         """
         Initialise le tracker de visage.
         
         Args:
             model_path: Chemin vers le modèle YOLO-face (.pt)
             conf_threshold: Seuil de confiance pour la détection (0.0-1.0)
+            auto_wifi: Active la gestion automatique Wi-Fi (True par défaut)
+            tello_ssid: SSID du réseau Tello (si None, sera détecté automatiquement)
         """
+        # Gestionnaire Wi-Fi automatique
+        self.wifi_manager = None
+        if auto_wifi:
+            print("\n=== Gestion automatique Wi-Fi ===")
+            self.wifi_manager = TelloWiFiManager()
+            if tello_ssid:
+                print(f"Connexion au réseau spécifié: {tello_ssid}")
+                if not self.wifi_manager.connect_to_tello(tello_ssid):
+                    print("\n⚠ ATTENTION: Échec de la connexion Wi-Fi automatique.")
+                    print("  Vous pouvez continuer si vous êtes déjà connecté manuellement au réseau Tello.")
+                    response = input("Continuer quand même? (o/n): ")
+                    if response.lower() != 'o':
+                        sys.exit(0)
+            else:
+                if not self.wifi_manager.auto_connect():
+                    print("\n⚠ ATTENTION: Échec de la connexion Wi-Fi automatique.")
+                    print("  Vous pouvez continuer si vous êtes déjà connecté manuellement au réseau Tello.")
+                    response = input("Continuer quand même? (o/n): ")
+                    if response.lower() != 'o':
+                        sys.exit(0)
+            print("=" * 40 + "\n")
+        
         # Chargement du modèle YOLO
         print(f"Chargement du modèle YOLO depuis {model_path}...")
         if not os.path.exists(model_path):
             print(f"Erreur: Le fichier {model_path} n'existe pas.")
             print("Assurez-vous que le modèle est présent dans le répertoire courant.")
+            if self.wifi_manager:
+                self.wifi_manager.cleanup()
             sys.exit(1)
         
         self.model = YOLO(model_path)
@@ -78,30 +351,35 @@ class FaceTracker:
         
         # Paramètres PID pour le contrôle du drone
         # Ces valeurs peuvent être ajustées selon les besoins
-        self.kp_x = 0.5    # Gain proportionnel horizontal (yaw)
-        self.kp_y = 0.3    # Gain proportionnel vertical
-        self.kd_x = 0.15   # Gain dérivé horizontal (réduit les oscillations)
-        self.kd_y = 0.1    # Gain dérivé vertical
+        # Réduits pour éviter les oscillations
+        self.kp_x = 0.15   # Gain proportionnel horizontal (yaw) - réduit pour mouvements plus doux
+        self.kp_y = 0.12   # Gain proportionnel vertical - réduit pour mouvements plus doux
+        self.kd_x = 0.25   # Gain dérivé horizontal (réduit les oscillations) - augmenté pour mieux amortir
+        self.kd_y = 0.2    # Gain dérivé vertical - augmenté pour mieux amortir
         
         # Variables pour le contrôle PID
         self.last_error_x = 0
         self.last_error_y = 0
         
-        # Vitesse maximale du drone
-        self.max_speed_yaw = 50      # deg/s pour la rotation
-        self.max_speed_vertical = 30  # cm/s pour le mouvement vertical
+        # Vitesse maximale du drone - réduites pour des mouvements plus doux
+        self.max_speed_yaw = 25      # deg/s pour la rotation (réduit de 50 à 25)
+        self.max_speed_vertical = 20  # cm/s pour le mouvement vertical (réduit de 30 à 20)
         
-        # Zone morte (dead zone) pour éviter les micro-mouvements
-        self.dead_zone = 20  # pixels
+        # Zone morte (dead zone) pour éviter les micro-mouvements - augmentée
+        self.dead_zone = 40  # pixels (augmenté de 20 à 40 pour réduire les micro-corrections)
         
         # Compteur de frames sans détection
         self.no_detection_count = 0
-        self.max_no_detection = 30  # Arrêter après 30 frames sans détection
+        self.max_no_detection = 1800000  # Arrêter après 180 frames sans détection
         
         # Statistiques
         self.fps = 0
         self.frame_count = 0
         self.start_time = time.time()
+
+        # Envoi des commandes RC toutes les 3 frames
+        self.rc_command_counter = 0
+        self.rc_command_interval = 3
         
     def get_frame(self) -> Optional[np.ndarray]:
         """
@@ -113,8 +391,18 @@ class FaceTracker:
         try:
             frame = self.frame_read.frame
             if frame is not None:
-                # Le Tello renvoie des frames en BGR
-                return frame
+                if not hasattr(self, 'last_frame_hash'):
+                    self.last_frame_hash = hash(frame.tobytes())
+                    # Le Tello renvoie des frames en BGR
+                    return frame
+                
+                current_frame_hash = hash(frame.tobytes())
+                if current_frame_hash != self.last_frame_hash:
+                    self.last_frame_hash = current_frame_hash
+                    return frame
+                else:
+                    return None
+
         except Exception as e:
             print(f"Erreur lors de la récupération de la frame: {e}")
         return None
@@ -183,10 +471,17 @@ class FaceTracker:
         if abs(error_y) < self.dead_zone:
             error_y = 0
         
+        # Détection d'oscillations : si l'erreur change de signe rapidement, réduire la réactivité
+        oscillation_x = (error_x * self.last_error_x < 0) if self.last_error_x != 0 else False
+        oscillation_y = (error_y * self.last_error_y < 0) if self.last_error_y != 0 else False
+        
+        # Facteur de réduction si oscillation détectée
+        damping_factor = 0.5 if (oscillation_x or oscillation_y) else 1.0
+        
         # Contrôle PID simplifié (sans terme intégral pour éviter l'instabilité)
         # Terme proportionnel
-        p_x = self.kp_x * error_x
-        p_y = self.kp_y * error_y
+        p_x = self.kp_x * error_x * damping_factor
+        p_y = self.kp_y * error_y * damping_factor
         
         # Terme dérivé
         d_x = self.kd_x * (error_x - self.last_error_x)
@@ -196,11 +491,18 @@ class FaceTracker:
         velocity_x = int(p_x + d_x)
         velocity_y = int(p_y + d_y)
         
+        # Réduction supplémentaire si l'erreur est petite (approche du centre)
+        if abs(error_x) < self.dead_zone * 2:
+            velocity_x = int(velocity_x * 0.6)  # Réduire de 40% quand proche du centre
+        if abs(error_y) < self.dead_zone * 2:
+            velocity_y = int(velocity_y * 0.6)  # Réduire de 40% quand proche du centre
+        
         # Limitation de la vitesse
         # velocity_x est pour le yaw (rotation) en deg/s
         # velocity_y est pour le mouvement vertical en cm/s
-        velocity_x = np.clip(velocity_x, -self.max_speed_yaw, self.max_speed_yaw)
-        velocity_y = np.clip(velocity_y, -self.max_speed_vertical, self.max_speed_vertical)
+        # Conversion explicite en int Python (np.clip retourne numpy.int64)
+        velocity_x = int(np.clip(velocity_x, -self.max_speed_yaw, self.max_speed_yaw))
+        velocity_y = int(np.clip(velocity_y, -self.max_speed_vertical, self.max_speed_vertical))
         
         # Mise à jour des erreurs précédentes
         self.last_error_x = error_x
@@ -222,6 +524,10 @@ class FaceTracker:
             Frame annotée
         """
         h, w = frame.shape[:2]
+        
+        # Recalculer le centre de l'image pour cette frame (au cas où les dimensions changent)
+        self.center_x = w // 2
+        self.center_y = h // 2
         
         # Dessin du centre de l'image (cible)
         cv2.circle(frame, (self.center_x, self.center_y), 10, (0, 255, 0), 2)
@@ -321,10 +627,12 @@ class FaceTracker:
                     self.no_detection_count += 1
                     
                     # Si aucun visage détecté pendant trop longtemps, atterrir
-                    if self.no_detection_count > self.max_no_detection and is_flying:
-                        print("Aucun visage detecte depuis trop longtemps. Atterrissage...")
-                        self.tello.land()
-                        is_flying = False
+                    #if self.no_detection_count > self.max_no_detection and is_flying:
+                    #    print("Aucun visage detecte depuis trop longtemps. Atterrissage...")
+                    #    self.tello.send_rc_control(0, 0, 0, 0)
+                    #    time.sleep(1)
+                    #    self.tello.land()
+                    #    is_flying = False
                 
                 # Application des commandes si le drone vole
                 if is_flying:
@@ -337,12 +645,19 @@ class FaceTracker:
                     # Pour centrer le visage:
                     # - Horizontal: utiliser yaw (rotation) pour tourner vers le visage
                     # - Vertical: utiliser up_down pour monter/descendre
-                    self.tello.send_rc_control(
-                        left_right_velocity=0,           # Pas de mouvement latéral
-                        forward_backward_velocity=0,     # Pas de mouvement avant/arrière
-                        up_down_velocity=-velocity_y,     # Mouvement vertical (inversé: visage en haut = descendre)
-                        yaw_velocity=velocity_x          # Rotation pour centrer horizontalement
-                    )
+                    self.rc_command_counter += 1
+                    if self.rc_command_counter >= self.rc_command_interval:
+                        print(f"Envoi de la commande RC: {velocity_x}, {velocity_y}")
+                        if velocity_x != 0 or velocity_y != 0:
+                            self.tello.send_rc_control(
+                                left_right_velocity=0,           # Pas de mouvement latéral
+                                forward_backward_velocity=0,     # Pas de mouvement avant/arrière
+                                up_down_velocity=-velocity_y,     # Mouvement vertical (inversé: visage en haut = descendre)
+                                yaw_velocity=velocity_x          # Rotation pour centrer horizontalement
+                            )
+                            self.rc_command_counter = 0
+                    #else:
+                    #    self.tello.send_rc_control(0, 0, 0, 0)
                 
                 # Dessin de l'overlay
                 frame = self.draw_overlay(frame, face_info, (velocity_x, velocity_y))
@@ -352,7 +667,7 @@ class FaceTracker:
                 
                 # Gestion des touches clavier
                 key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
+                if key == ord('a'):
                     print("Arret demande par l'utilisateur...")
                     break
                 elif key == ord('t'):
@@ -360,18 +675,31 @@ class FaceTracker:
                         print("Decollage...")
                         self.tello.takeoff()
                         is_flying = True
+                        time.sleep(3)
                     else:
                         print("Atterrissage...")
+                        self.tello.send_rc_control(0, 0, 0, 0)
+                        time.sleep(1)
                         self.tello.land()
                         is_flying = False
-                elif key == ord('w') and is_flying:
+                elif key == ord('z') and is_flying:
                     self.tello.send_rc_control(0, 20, 0, 0)  # Avancer
                 elif key == ord('s') and is_flying:
                     self.tello.send_rc_control(0, -20, 0, 0)  # Reculer
-                elif key == ord('a') and is_flying:
+                elif key == ord('q') and is_flying:
                     self.tello.send_rc_control(-20, 0, 0, 0)  # Gauche
                 elif key == ord('d') and is_flying:
                     self.tello.send_rc_control(20, 0, 0, 0)  # Droite
+                elif key == 82 and is_flying:
+                    self.tello.send_rc_control(0, 0, 20, 0)  # Monter
+                elif key == 84 and is_flying:
+                    self.tello.send_rc_control(0, 0, -20, 0)  # Descendre
+                elif key == 83 and is_flying:
+                    self.tello.send_rc_control(0, 0, 0, 20)  # Tourner à droite
+                elif key == 81 and is_flying:
+                    self.tello.send_rc_control(0, 0, 0, -20)  # Tourner à gauche
+                elif key == ord(' ') and is_flying:
+                    self.tello.send_rc_control(0, 0, 0, 0)  # Stop
                 
                 # Calcul du FPS
                 self.frame_count += 1
@@ -394,6 +722,8 @@ class FaceTracker:
         try:
             if self.tello.is_flying:
                 print("Atterrissage du drone...")
+                self.tello.send_rc_control(0, 0, 0, 0)
+                time.sleep(1)
                 self.tello.land()
         except:
             pass
@@ -405,6 +735,12 @@ class FaceTracker:
             pass
         
         cv2.destroyAllWindows()
+        
+        # Restauration de la connexion Wi-Fi précédente
+        if self.wifi_manager:
+            print("\nRestauration de la connexion Wi-Fi...")
+            self.wifi_manager.cleanup()
+        
         print("Nettoyage termine.")
 
 
@@ -412,13 +748,44 @@ def main():
     """
     Fonction principale.
     """
-    # Vérification des arguments
-    model_path = "yolov8n-face.pt"
-    if len(sys.argv) > 1:
-        model_path = sys.argv[1]
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Script de face tracking pour drone DJI Tello avec gestion Wi-Fi automatique"
+    )
+    parser.add_argument(
+        '--model',
+        type=str,
+        default="yolov8n-face.pt",
+        help="Chemin vers le modèle YOLO-face (.pt)"
+    )
+    parser.add_argument(
+        '--conf',
+        type=float,
+        default=0.25,
+        help="Seuil de confiance pour la détection (0.0-1.0)"
+    )
+    parser.add_argument(
+        '--no-auto-wifi',
+        action='store_true',
+        help="Désactive la gestion automatique Wi-Fi"
+    )
+    parser.add_argument(
+        '--tello-ssid',
+        type=str,
+        default=None,
+        help="SSID du réseau Tello (si non spécifié, sera détecté automatiquement)"
+    )
+    
+    args = parser.parse_args()
     
     # Création et lancement du tracker
-    tracker = FaceTracker(model_path=model_path, conf_threshold=0.25)
+    tracker = FaceTracker(
+        model_path=args.model,
+        conf_threshold=args.conf,
+        auto_wifi=not args.no_auto_wifi,
+        tello_ssid=args.tello_ssid
+    )
     tracker.run()
 
 
