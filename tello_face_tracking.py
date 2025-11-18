@@ -34,6 +34,26 @@ except ImportError:
     sys.exit(1)
 
 
+def get_resource_path(relative_path: str) -> str:
+    """
+    Obtient le chemin absolu vers une ressource, fonctionne pour le dev et PyInstaller.
+    
+    Args:
+        relative_path: Chemin relatif vers la ressource
+        
+    Returns:
+        Chemin absolu vers la ressource
+    """
+    try:
+        # PyInstaller crée un dossier temporaire et stocke le chemin dans _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # En mode développement, utiliser le répertoire du script
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    
+    return os.path.join(base_path, relative_path)
+
+
 class TelloWiFiManager:
     """
     Gestionnaire Wi-Fi automatique pour se connecter au drone Tello.
@@ -321,6 +341,13 @@ class FaceTracker:
             print("=" * 40 + "\n")
         
         # Chargement du modèle YOLO
+        # Si le chemin est relatif, essayer de le trouver dans les ressources PyInstaller
+        if not os.path.isabs(model_path) and not os.path.exists(model_path):
+            # Essayer de trouver le modèle dans les ressources PyInstaller
+            resource_path = get_resource_path(model_path)
+            if os.path.exists(resource_path):
+                model_path = resource_path
+        
         print(f"Chargement du modèle YOLO depuis {model_path}...")
         if not os.path.exists(model_path):
             print(f"Erreur: Le fichier {model_path} n'existe pas.")

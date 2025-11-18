@@ -31,7 +31,8 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-*.spec
+# Garder tello_face_tracking.spec car c'est un fichier de configuration du projet
+# *.spec
 
 # Installer logs
 pip-log.txt
@@ -134,6 +135,11 @@ runs/
 wandb/
 
 .DS_Store
+
+# Installateur Windows
+installer/
+*.exe
+!yolov8n-face.pt
 
 # Neural Network weights -----------------------------------------------------------------------------------------------
 weights/
