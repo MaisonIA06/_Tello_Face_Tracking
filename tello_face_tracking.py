@@ -9,12 +9,13 @@ pour garder le visage au centre de l'image.
 import cv2
 import numpy as np
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import sys
 import os
 import subprocess
 
-os.environ['QT_QPA_PLATFORM'] = 'xcb'
+# Ne pas forcer xcb ici car cela peut causer des conflits avec PyQt6
+# La configuration Qt sera gérée par PyQt6 si nécessaire
 
 # Import de YOLO depuis ultralytics
 try:
@@ -282,7 +283,8 @@ class FaceTracker:
     """
     
     def __init__(self, model_path: str = "yolov8n-face.pt", conf_threshold: float = 0.25, 
-                 auto_wifi: bool = True, tello_ssid: Optional[str] = None):
+                 auto_wifi: bool = True, tello_ssid: Optional[str] = None,
+                 gui_mode: bool = False):
         """
         Initialise le tracker de visage.
         
@@ -291,7 +293,9 @@ class FaceTracker:
             conf_threshold: Seuil de confiance pour la détection (0.0-1.0)
             auto_wifi: Active la gestion automatique Wi-Fi (True par défaut)
             tello_ssid: SSID du réseau Tello (si None, sera détecté automatiquement)
+            gui_mode: Active le mode GUI (désactive les prompts interactifs)
         """
+        self.gui_mode = gui_mode
         # Gestionnaire Wi-Fi automatique
         self.wifi_manager = None
         if auto_wifi:
@@ -302,16 +306,18 @@ class FaceTracker:
                 if not self.wifi_manager.connect_to_tello(tello_ssid):
                     print("\n⚠ ATTENTION: Échec de la connexion Wi-Fi automatique.")
                     print("  Vous pouvez continuer si vous êtes déjà connecté manuellement au réseau Tello.")
-                    response = input("Continuer quand même? (o/n): ")
-                    if response.lower() != 'o':
-                        sys.exit(0)
+                    if not self.gui_mode:
+                        response = input("Continuer quand même? (o/n): ")
+                        if response.lower() != 'o':
+                            sys.exit(0)
             else:
                 if not self.wifi_manager.auto_connect():
                     print("\n⚠ ATTENTION: Échec de la connexion Wi-Fi automatique.")
                     print("  Vous pouvez continuer si vous êtes déjà connecté manuellement au réseau Tello.")
-                    response = input("Continuer quand même? (o/n): ")
-                    if response.lower() != 'o':
-                        sys.exit(0)
+                    if not self.gui_mode:
+                        response = input("Continuer quand même? (o/n): ")
+                        if response.lower() != 'o':
+                            sys.exit(0)
             print("=" * 40 + "\n")
         
         # Chargement du modèle YOLO
@@ -336,14 +342,37 @@ class FaceTracker:
         print(f"Niveau de batterie: {battery}%")
         if battery < 20:
             print("ATTENTION: Batterie faible! Chargez le drone avant de continuer.")
-            response = input("Continuer quand même? (o/n): ")
-            if response.lower() != 'o':
-                self.tello.end()
-                sys.exit(0)
+            if not self.gui_mode:
+                response = input("Continuer quand même? (o/n): ")
+                if response.lower() != 'o':
+                    self.tello.end()
+                    sys.exit(0)
         
         # Configuration du flux vidéo
-        self.tello.streamon()
-        self.frame_read = self.tello.get_frame_read()
+        try:
+            self.tello.streamon()
+            self.frame_read = self.tello.get_frame_read()
+        except Exception as e:
+            print(f"Erreur lors du démarrage du flux vidéo: {e}")
+            if "bind failed" in str(e).lower() or "adresse déjà utilisée" in str(e).lower():
+                print("Le port du flux vidéo est déjà utilisé.")
+                print("Essayez de redémarrer le programme ou attendez quelques secondes.")
+                # Essayer de nettoyer d'abord
+                try:
+                    self.tello.streamoff()
+                    time.sleep(1)
+                    self.tello.streamon()
+                    self.frame_read = self.tello.get_frame_read()
+                    print("Flux vidéo redémarré avec succès.")
+                except Exception as e2:
+                    print(f"Impossible de redémarrer le flux: {e2}")
+                    if not self.gui_mode:
+                        response = input("Continuer sans flux vidéo? (o/n): ")
+                        if response.lower() != 'o':
+                            self.tello.end()
+                            sys.exit(0)
+            else:
+                raise
         
         # Paramètres de contrôle
         self.center_x = 0  # Centre horizontal de l'image (sera mis à jour)
@@ -386,6 +415,9 @@ class FaceTracker:
         # Envoi des commandes RC toutes les 3 frames
         self.rc_command_counter = 0
         self.rc_command_interval = 3
+        
+        # Flag pour éviter les appels multiples de cleanup
+        self._cleaning = False
         
     def get_frame(self) -> Optional[np.ndarray]:
         """
@@ -604,6 +636,44 @@ class FaceTracker:
         
         return frame
     
+    def _convert_frame_to_qimage(self, frame: np.ndarray):
+        """
+        Convertit une frame OpenCV (BGR) en QImage (RGB) pour PyQt6.
+        Optimisé pour éviter les copies inutiles.
+        
+        Args:
+            frame: Frame OpenCV en format BGR numpy array
+            
+        Returns:
+            QImage en format RGB
+        """
+        try:
+            from PyQt6.QtGui import QImage
+            
+            if frame is None or frame.size == 0:
+                return None
+            
+            # Convertir BGR vers RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Obtenir les dimensions
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            
+            # Créer QImage directement depuis les données numpy
+            # Utiliser constData pour éviter les copies si possible
+            qimage = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # Copier les données pour éviter les problèmes de mémoire
+            # (nécessaire car rgb_frame peut être libéré)
+            return qimage.copy()
+        except ImportError:
+            # Si PyQt6 n'est pas disponible, retourner None
+            return None
+        except Exception as e:
+            # Ne pas imprimer d'erreur à chaque frame pour éviter la saturation
+            return None
+    
     def run(self):
         """
         Boucle principale de tracking.
@@ -739,29 +809,63 @@ class FaceTracker:
     def cleanup(self):
         """
         Nettoie les ressources et atterrit le drone.
+        Cette méthode est idempotente (peut être appelée plusieurs fois sans erreur).
         """
+        # Éviter les appels multiples
+        if hasattr(self, '_cleaning') and self._cleaning:
+            return
+        self._cleaning = True
+        
         print("\nNettoyage des ressources...")
-        try:
-            if self.tello.is_flying:
-                print("Atterrissage du drone...")
-                self.tello.send_rc_control(0, 0, 0, 0)
-                time.sleep(1)
-                self.tello.land()
-        except:
-            pass
         
+        # Atterrissage du drone si nécessaire
         try:
-            self.tello.streamoff()
-            self.tello.end()
-        except:
-            pass
+            if hasattr(self, 'tello') and self.tello is not None:
+                try:
+                    if self.tello.is_flying:
+                        print("Atterrissage du drone...")
+                        self.tello.send_rc_control(0, 0, 0, 0)
+                        time.sleep(0.5)
+                        self.tello.land()
+                        time.sleep(0.5)
+                except Exception as e:
+                    print(f"Erreur lors de l'atterrissage (peut être ignorée): {e}")
+        except Exception as e:
+            print(f"Erreur lors de la vérification de l'état du drone: {e}")
         
-        cv2.destroyAllWindows()
+        # Arrêt du flux vidéo et fermeture de la connexion
+        try:
+            if hasattr(self, 'tello') and self.tello is not None:
+                try:
+                    self.tello.streamoff()
+                except Exception as e:
+                    print(f"Erreur lors de l'arrêt du flux (peut être ignorée): {e}")
+                
+                try:
+                    self.tello.end()
+                except Exception as e:
+                    print(f"Erreur lors de la fermeture de la connexion (peut être ignorée): {e}")
+                
+                # Marquer comme nettoyé pour éviter les appels répétés
+                self.tello = None
+        except Exception as e:
+            print(f"Erreur lors du nettoyage du drone: {e}")
+        
+        # Fermeture des fenêtres OpenCV (seulement en mode CLI)
+        if not self.gui_mode:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
         
         # Restauration de la connexion Wi-Fi précédente
-        if self.wifi_manager:
-            print("\nRestauration de la connexion Wi-Fi...")
-            self.wifi_manager.cleanup()
+        try:
+            if hasattr(self, 'wifi_manager') and self.wifi_manager is not None:
+                print("\nRestauration de la connexion Wi-Fi...")
+                self.wifi_manager.cleanup()
+                self.wifi_manager = None
+        except Exception as e:
+            print(f"Erreur lors de la restauration Wi-Fi: {e}")
         
         print("Nettoyage termine.")
 
@@ -798,17 +902,50 @@ def main():
         default=None,
         help="SSID du réseau Tello (si non spécifié, sera détecté automatiquement)"
     )
+    parser.add_argument(
+        '--gui',
+        action='store_true',
+        help="Lance l'interface graphique (PyQt6 requis)"
+    )
+    parser.add_argument(
+        '--cli',
+        action='store_true',
+        help="Force le mode ligne de commande (désactive la GUI)"
+    )
     
     args = parser.parse_args()
     
-    # Création et lancement du tracker
-    tracker = FaceTracker(
-        model_path=args.model,
-        conf_threshold=args.conf,
-        auto_wifi=not args.no_auto_wifi,
-        tello_ssid=args.tello_ssid
-    )
-    tracker.run()
+    # Détection du mode GUI
+    use_gui = False
+    if args.gui:
+        use_gui = True
+    elif not args.cli:
+        # Par défaut, essayer d'utiliser la GUI si PyQt6 est disponible
+        try:
+            import PyQt6.QtWidgets
+            use_gui = True
+        except ImportError:
+            use_gui = False
+    
+    if use_gui:
+        # Lancer l'interface graphique
+        try:
+            from gui.tello_gui import main as gui_main
+            gui_main()
+        except ImportError as e:
+            print(f"Erreur: Impossible d'importer l'interface graphique: {e}")
+            print("Assurez-vous que PyQt6 est installé: pip install PyQt6")
+            sys.exit(1)
+    else:
+        # Mode ligne de commande
+        tracker = FaceTracker(
+            model_path=args.model,
+            conf_threshold=args.conf,
+            auto_wifi=not args.no_auto_wifi,
+            tello_ssid=args.tello_ssid,
+            gui_mode=False
+        )
+        tracker.run()
 
 
 if __name__ == "__main__":
