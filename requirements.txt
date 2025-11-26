@@ -27,6 +27,8 @@ psutil
 thop>=0.1.1
 # ultralytics
 
+# Dépendances pour le module ultralytics
+sentry-sdk>=1.0.0
 
 # GUI
 PyQt6>=6.0.0
