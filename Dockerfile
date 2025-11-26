@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le reste du code source
 COPY . .
 
+ENV PYTHONPATH=/app:${PYTHONPATH}
+
 # Définir la variable d'environnement pour l'affichage (sera écrasée au runtime)
 ENV DISPLAY=host.docker.internal:0.0
 ENV QT_QPA_PLATFORM=xcb
