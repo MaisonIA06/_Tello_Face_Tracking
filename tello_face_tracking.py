@@ -13,6 +13,7 @@ from typing import Optional, Tuple, Dict, Any
 import sys
 import os
 import subprocess
+import platform
 
 # Ne pas forcer xcb ici car cela peut causer des conflits avec PyQt6
 # La configuration Qt sera gérée par PyQt6 si nécessaire
@@ -72,32 +73,53 @@ class TelloWiFiManager:
         self.original_connection = None
         self.tello_ssid = None
         self.is_connected_to_tello = False
+        self.os_type = platform.system()
         
     def check_network_manager(self) -> bool:
         """
-        Vérifie si NetworkManager (nmcli) est disponible.
-        
-        Returns:
-            True si nmcli est disponible, False sinon
+        Vérifie si l'outil de gestion réseau est disponible (nmcli sur Linux, netsh sur Windows).
         """
-        try:
-            result = subprocess.run(
-                ['which', 'nmcli'],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            return result.returncode == 0
-        except:
-            return False
+        if self.os_type == "Windows":
+            return True  # netsh est toujours disponible sur Windows
+        else:
+            try:
+                result = subprocess.run(
+                    ['which', 'nmcli'],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                return result.returncode == 0
+            except:
+                return False
     
     def get_current_connection(self) -> Optional[str]:
         """
         Récupère le nom de la connexion Wi-Fi actuelle.
-        
-        Returns:
-            Nom de la connexion actuelle ou None
         """
+        if self.os_type == "Windows":
+            return self._get_current_connection_windows()
+        else:
+            return self._get_current_connection_linux()
+
+    def _get_current_connection_windows(self) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ['netsh', 'wlan', 'show', 'interfaces'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            for line in result.stdout.split('\n'):
+                if "SSID" in line and "BSSID" not in line:
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        return parts[1].strip()
+            return None
+        except:
+            return None
+
+    def _get_current_connection_linux(self) -> Optional[str]:
         try:
             result = subprocess.run(
                 ['nmcli', '-t', '-f', 'NAME,DEVICE,TYPE', 'connection', 'show', '--active'],
@@ -112,21 +134,12 @@ class TelloWiFiManager:
                     if len(parts) >= 2:
                         return parts[0]
             return None
-        except subprocess.CalledProcessError:
-            return None
-        except Exception as e:
-            print(f"Erreur lors de la récupération de la connexion actuelle: {e}")
+        except:
             return None
     
     def scan_for_tello(self, timeout: int = 30) -> Optional[str]:
         """
         Scanne les réseaux Wi-Fi disponibles pour trouver le Tello.
-        
-        Args:
-            timeout: Temps maximum d'attente en secondes
-            
-        Returns:
-            SSID du réseau Tello trouvé ou None
         """
         print(f"Recherche du réseau Tello (motif: {self.tello_ssid_pattern})...")
         print("Assurez-vous que le drone Tello est allumé et en mode Wi-Fi.")
@@ -139,56 +152,66 @@ class TelloWiFiManager:
             attempts += 1
             print(f"Tentative {attempts}/{max_attempts}...")
             
-            try:
-                # Scanner les réseaux Wi-Fi
-                result = subprocess.run(
-                    ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'device', 'wifi', 'list'],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=10
-                )
+            ssid = None
+            if self.os_type == "Windows":
+                ssid = self._scan_windows()
+            else:
+                ssid = self._scan_linux()
                 
-                # Chercher le réseau Tello
-                for line in result.stdout.strip().split('\n'):
-                    if line:
-                        parts = line.split(':')
-                        if len(parts) >= 1:
-                            ssid = parts[0].strip()
-                            if self.tello_ssid_pattern in ssid.upper():
-                                print(f"✓ Réseau Tello trouvé: {ssid}")
-                                return ssid
-                
-                time.sleep(5)
-                
-            except subprocess.TimeoutExpired:
-                print("Timeout lors du scan, nouvelle tentative...")
-                continue
-            except subprocess.CalledProcessError as e:
-                print(f"Erreur lors du scan: {e}")
-                time.sleep(5)
-                continue
-            except Exception as e:
-                print(f"Erreur inattendue: {e}")
-                time.sleep(5)
-                continue
+            if ssid:
+                print(f"✓ Réseau Tello trouvé: {ssid}")
+                return ssid
+            
+            time.sleep(5)
         
         print("✗ Réseau Tello non trouvé après le timeout.")
         return None
+
+    def _scan_windows(self) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ['netsh', 'wlan', 'show', 'networks'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            for line in result.stdout.split('\n'):
+                if "SSID" in line:
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        ssid = parts[1].strip()
+                        if self.tello_ssid_pattern in ssid.upper():
+                            return ssid
+            return None
+        except:
+            return None
+
+    def _scan_linux(self) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'device', 'wifi', 'list'],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10
+            )
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split(':')
+                    if len(parts) >= 1:
+                        ssid = parts[0].strip()
+                        if self.tello_ssid_pattern in ssid.upper():
+                            return ssid
+            return None
+        except:
+            return None
     
     def connect_to_tello(self, ssid: Optional[str] = None) -> bool:
         """
         Se connecte au réseau Wi-Fi du Tello.
-        
-        Args:
-            ssid: SSID du réseau Tello (si None, scanne d'abord)
-            
-        Returns:
-            True si la connexion réussit, False sinon
         """
         if not self.check_network_manager():
-            print("✗ Erreur: NetworkManager (nmcli) n'est pas disponible.")
-            print("  Installez NetworkManager avec: sudo apt-get install network-manager")
+            print("✗ Erreur: Outil de gestion réseau non disponible.")
             return False
         
         # Sauvegarder la connexion actuelle
@@ -206,8 +229,40 @@ class TelloWiFiManager:
         
         # Se connecter au réseau Tello
         print(f"Connexion au réseau {ssid}...")
+        
+        success = False
+        if self.os_type == "Windows":
+            success = self._connect_windows(ssid)
+        else:
+            success = self._connect_linux(ssid)
+            
+        if success:
+            print(f"✓ Connecté au réseau {ssid}")
+            self.is_connected_to_tello = True
+            return True
+        else:
+            print("✗ La connexion n'a pas pu être établie.")
+            return False
+
+    def _connect_windows(self, ssid: str) -> bool:
         try:
-            # Essayer de se connecter au réseau
+            # Sur Windows, il faut souvent un profil. On essaie de se connecter directement.
+            # Si le réseau est ouvert (comme Tello), ça devrait marcher si un profil existe ou est créé auto.
+            # Sinon, on crée un profil temporaire XML (plus complexe, on tente simple d'abord)
+            cmd = ['netsh', 'wlan', 'connect', f'name={ssid}']
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            
+            # Attendre un peu
+            time.sleep(5)
+            
+            # Vérifier
+            current = self._get_current_connection_windows()
+            return current == ssid
+        except:
+            return False
+
+    def _connect_linux(self, ssid: str) -> bool:
+        try:
             result = subprocess.run(
                 ['nmcli', 'device', 'wifi', 'connect', ssid],
                 capture_output=True,
@@ -215,41 +270,20 @@ class TelloWiFiManager:
                 check=False,
                 timeout=30
             )
-            
             if result.returncode == 0:
-                # Attendre que la connexion soit établie
-                print("Attente de l'établissement de la connexion...")
                 time.sleep(5)
-                
-                # Vérifier la connexion
-                current = self.get_current_connection()
-                if current and ssid in current:
-                    print(f"✓ Connecté au réseau {ssid}")
-                    self.is_connected_to_tello = True
-                    return True
-                else:
-                    print("✗ La connexion n'a pas pu être établie.")
-                    return False
-            else:
-                print(f"✗ Erreur lors de la connexion: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            print("✗ Timeout lors de la connexion.")
+                current = self._get_current_connection_linux()
+                return current and ssid in current
             return False
-        except Exception as e:
-            print(f"✗ Erreur lors de la connexion: {e}")
+        except:
             return False
     
     def restore_connection(self) -> bool:
         """
         Restaure la connexion Wi-Fi précédente.
-        
-        Returns:
-            True si la restauration réussit, False sinon
         """
         if not self.is_connected_to_tello:
-            return True  # Rien à restaurer
+            return True
         
         if self.original_connection is None:
             print("Aucune connexion précédente à restaurer.")
@@ -257,26 +291,29 @@ class TelloWiFiManager:
         
         print(f"Restauration de la connexion: {self.original_connection}...")
         
-        try:
-            result = subprocess.run(
-                ['nmcli', 'connection', 'up', self.original_connection],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                print(f"✓ Connexion restaurée: {self.original_connection}")
-                self.is_connected_to_tello = False
-                return True
-            else:
-                print(f"✗ Erreur lors de la restauration: {result.stderr}")
-                print("  Vous devrez peut-être vous reconnecter manuellement.")
-                return False
+        success = False
+        if self.os_type == "Windows":
+            success = self._connect_windows(self.original_connection)
+        else:
+            # Sur Linux, pour restaurer une connexion connue, 'connection up' est mieux que 'device wifi connect'
+            try:
+                result = subprocess.run(
+                    ['nmcli', 'connection', 'up', self.original_connection],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30
+                )
+                success = (result.returncode == 0)
+            except:
+                success = False
                 
-        except Exception as e:
-            print(f"✗ Erreur lors de la restauration: {e}")
+        if success:
+            print(f"✓ Connexion restaurée: {self.original_connection}")
+            self.is_connected_to_tello = False
+            return True
+        else:
+            print(f"✗ Erreur lors de la restauration.")
             return False
     
     def auto_connect(self) -> bool:
