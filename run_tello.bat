@@ -46,6 +46,7 @@ echo.
 echo [IMPORTANT] Assurez-vous que :
 echo 1. VcXsrv (XLaunch) est lance avec "Disable access control" coche.
 echo 2. Vous etes connecte au Wi-Fi du Tello.
+echo 3. Le pare-feu Windows autorise les ports 8889 et 11111 (UDP).
 echo.
 pause
 
@@ -63,21 +64,20 @@ set LOCAL_IP=%LOCAL_IP:~1%
 echo [DEBUG] Utilisation de DISPLAY=%LOCAL_IP%:0.0
 echo [DEBUG] Si cela ne fonctionne pas, essayez host.docker.internal:0.0
 
-REM Lancement du conteneur
-REM --rm : supprime le conteneur après l'arrêt
-REM -it : mode interactif
-REM --net=host : utilise le réseau de l'hôte (souvent nécessaire pour le drone, mais ne fonctionne pas toujours bien sur Windows/Mac)
-REM Alternative : mapping de ports UDP
-REM 8889 : Commandes Tello
-REM 11111 : Flux vidéo Tello
-REM DISPLAY=host.docker.internal:0.0 : Pour l'affichage X11 sur Windows
+REM Lancement du conteneur avec configuration réseau améliorée pour Windows
+REM Important pour Windows :
+REM - Utiliser --network bridge (par défaut) mais avec les ports mappés
+REM - Ajouter --add-host pour résoudre l'IP du Tello
+REM - Mapper les ports UDP en mode publish (pas bind)
+REM - Utiliser --privileged peut aider mais n'est pas nécessaire ici
 
 docker run --rm -it ^
     -e DISPLAY=%LOCAL_IP%:0.0 ^
     -e QT_QPA_PLATFORM=xcb ^
     -e QT_X11_NO_MITSHM=1 ^
-    -p 8889:8889/udp ^
-    -p 11111:11111/udp ^
+    --add-host=host.docker.internal:host-gateway ^
+    -p 0.0.0.0:8889:8889/udp ^
+    -p 0.0.0.0:11111:11111/udp ^
     --name tello-face-tracking-container ^
     %IMAGE_NAME%
 
@@ -87,11 +87,14 @@ if %EXIT_CODE% neq 0 (
     echo.
     echo [ERREUR] Le conteneur s'est arrete avec le code d'erreur: %EXIT_CODE%
     echo.
-    echo Pour voir les logs du conteneur, executez:
-    echo   docker logs tello-face-tracking-container
+    echo [DEPANNAGE]
+    echo 1. Verifiez que vous etes bien connecte au Wi-Fi du Tello
+    echo 2. Verifiez que le pare-feu Windows autorise les ports 8889 et 11111 (UDP)
+    echo 3. Essayez de desactiver temporairement le pare-feu pour tester
+    echo 4. Verifiez que le drone Tello est allume et pret
     echo.
-    echo Pour voir les logs meme apres l'arret:
-    echo   docker logs tello-face-tracking-container 2^>^&1
+    echo Pour voir les logs du conteneur:
+    echo   docker logs tello-face-tracking-container
 )
 
 echo.
