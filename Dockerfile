@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    x11-apps \
     && rm -rf /var/lib/apt/lists/*
 
 # Copier le fichier de dépendances
@@ -24,6 +25,7 @@ COPY . .
 
 # Définir la variable d'environnement pour l'affichage (sera écrasée au runtime)
 ENV DISPLAY=host.docker.internal:0.0
+ENV QT_QPA_PLATFORM=xcb
 
 # Commande par défaut pour lancer l'application
-CMD ["python", "tello_face_tracking.py"]
+CMD ["python", "-u", "tello_face_tracking.py"]
