@@ -361,19 +361,73 @@ class FaceTracker:
         
         # Initialisation du drone Tello
         print("Connexion au drone Tello...")
-        self.tello = Tello()
-        self.tello.connect()
+        
+        # Vérifier la connectivité réseau avant de se connecter
+        import socket
+        tello_ip = "192.168.10.1"
+        tello_port = 8889
+        
+        print(f"Vérification de l'accessibilité du Tello ({tello_ip})...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2)
+            # Essayer de se connecter (UDP est connectionless, mais on peut tester)
+            sock.connect((tello_ip, tello_port))
+            sock.close()
+            print(f"✓ IP du Tello accessible: {tello_ip}")
+        except Exception as e:
+            print(f"⚠ ATTENTION: Problème de connectivité réseau: {e}")
+            print("Vérifiez que vous êtes connecté au Wi-Fi du Tello")
+        
+        self.tello = Tello(host=tello_ip)
+        
+        # Tentative de connexion avec gestion d'erreur améliorée
+        try:
+            print("Tentative de connexion au Tello...")
+            self.tello.connect()
+            print("✓ Connexion établie avec succès")
+        except Exception as e:
+            error_msg = str(e)
+            print(f"✗ Erreur de connexion: {error_msg}")
+            
+            if "state packet" in error_msg.lower():
+                print("\n" + "="*60)
+                print("[ERREUR RESEAU DOCKER]")
+                print("="*60)
+                print("Le conteneur Docker ne peut pas recevoir les paquets d'état UDP du Tello.")
+                print("\nCauses possibles:")
+                print("1. Docker Desktop sur Windows a des limitations avec UDP")
+                print("2. Le pare-feu Windows bloque les ports UDP 8889 et 11111")
+                print("3. Le mode réseau Docker n'est pas configuré correctement")
+                print("\nSolutions à essayer:")
+                print("1. Vérifiez que vous êtes connecté au Wi-Fi du Tello")
+                print("2. Dans Docker Desktop: Settings > General > WSL Integration")
+                print("   Activez l'intégration WSL2 si disponible")
+                print("3. Ajoutez des règles de pare-feu pour les ports UDP:")
+                print("   - Port 8889 (commandes Tello)")
+                print("   - Port 11111 (flux vidéo et état)")
+                print("4. Essayez de redémarrer Docker Desktop")
+                print("5. Si possible, utilisez --network host dans le script de lancement")
+                print("="*60)
+            
+            if self.wifi_manager:
+                self.wifi_manager.cleanup()
+            sys.exit(1)
         
         # Vérification de la batterie
-        battery = self.tello.get_battery()
-        print(f"Niveau de batterie: {battery}%")
-        if battery < 20:
-            print("ATTENTION: Batterie faible! Chargez le drone avant de continuer.")
-            if not self.gui_mode:
-                response = input("Continuer quand même? (o/n): ")
-                if response.lower() != 'o':
-                    self.tello.end()
-                    sys.exit(0)
+        try:
+            battery = self.tello.get_battery()
+            print(f"Niveau de batterie: {battery}%")
+            if battery < 20:
+                print("ATTENTION: Batterie faible! Chargez le drone avant de continuer.")
+                if not self.gui_mode:
+                    response = input("Continuer quand même? (o/n): ")
+                    if response.lower() != 'o':
+                        self.tello.end()
+                        sys.exit(0)
+        except Exception as e:
+            print(f"⚠ Impossible de lire le niveau de batterie: {e}")
+            print("Continuons quand même...")
         
         # Configuration du flux vidéo
         try:

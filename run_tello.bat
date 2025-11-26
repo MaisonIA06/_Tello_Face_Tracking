@@ -64,22 +64,50 @@ set LOCAL_IP=%LOCAL_IP:~1%
 echo [DEBUG] Utilisation de DISPLAY=%LOCAL_IP%:0.0
 echo [DEBUG] Si cela ne fonctionne pas, essayez host.docker.internal:0.0
 
-REM Lancement du conteneur avec configuration réseau améliorée pour Windows
-REM Important pour Windows :
-REM - Utiliser --network bridge (par défaut) mais avec les ports mappés
-REM - Ajouter --add-host pour résoudre l'IP du Tello
-REM - Mapper les ports UDP en mode publish (pas bind)
-REM - Utiliser --privileged peut aider mais n'est pas nécessaire ici
+REM Vérifier la connectivité avec le Tello
+echo [INFO] Verification de la connexion au Tello...
+ping -n 1 192.168.10.1 >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ATTENTION] Impossible de joindre 192.168.10.1
+    echo Assurez-vous d'etre connecte au Wi-Fi du Tello
+    pause
+)
 
-docker run --rm -it ^
-    -e DISPLAY=%LOCAL_IP%:0.0 ^
-    -e QT_QPA_PLATFORM=xcb ^
-    -e QT_X11_NO_MITSHM=1 ^
-    --add-host=host.docker.internal:host-gateway ^
-    -p 0.0.0.0:8889:8889/udp ^
-    -p 0.0.0.0:11111:11111/udp ^
-    --name tello-face-tracking-container ^
-    %IMAGE_NAME%
+REM Lancement du conteneur avec configuration réseau améliorée pour Windows
+REM Sur Windows avec Docker Desktop, on essaie d'abord --network host (si WSL2 backend)
+REM Sinon on utilise le mode bridge avec mapping de ports
+
+REM Vérifier si --network host est supporté (WSL2 backend)
+echo [INFO] Test du mode reseau host (WSL2 backend)...
+docker run --rm --network host alpine echo "test" >nul 2>&1
+set HOST_MODE_AVAILABLE=%errorlevel%
+
+if %HOST_MODE_AVAILABLE% equ 0 (
+    echo [INFO] Mode host disponible, utilisation du reseau de l'hote...
+    docker run --rm -it ^
+        --network host ^
+        -e DISPLAY=%LOCAL_IP%:0.0 ^
+        -e QT_QPA_PLATFORM=xcb ^
+        -e QT_X11_NO_MITSHM=1 ^
+        -e PYTHONPATH=/app ^
+        --name tello-face-tracking-container ^
+        %IMAGE_NAME%
+) else (
+    echo [INFO] Mode host non disponible, utilisation du mode bridge...
+    echo [INFO] Note: Le mode bridge peut avoir des problemes avec UDP sur Windows
+    echo [INFO] Assurez-vous d'avoir execute setup_network.ps1 pour configurer le pare-feu
+    
+    REM Mode bridge avec mapping de ports explicite
+    docker run --rm -it ^
+        -e DISPLAY=%LOCAL_IP%:0.0 ^
+        -e QT_QPA_PLATFORM=xcb ^
+        -e QT_X11_NO_MITSHM=1 ^
+        -e PYTHONPATH=/app ^
+        -p 8889:8889/udp ^
+        -p 11111:11111/udp ^
+        --name tello-face-tracking-container ^
+        %IMAGE_NAME%
+)
 
 set EXIT_CODE=%errorlevel%
 
@@ -88,10 +116,14 @@ if %EXIT_CODE% neq 0 (
     echo [ERREUR] Le conteneur s'est arrete avec le code d'erreur: %EXIT_CODE%
     echo.
     echo [DEPANNAGE]
-    echo 1. Verifiez que vous etes bien connecte au Wi-Fi du Tello
-    echo 2. Verifiez que le pare-feu Windows autorise les ports 8889 et 11111 (UDP)
-    echo 3. Essayez de desactiver temporairement le pare-feu pour tester
-    echo 4. Verifiez que le drone Tello est allume et pret
+    echo 1. Verifiez que vous etes bien connecte au Wi-Fi du Tello (192.168.10.1)
+    echo 2. Testez la connexion: ping 192.168.10.1
+    echo 3. Verifiez que le pare-feu Windows autorise les ports 8889 et 11111 (UDP)
+    echo 4. Dans Docker Desktop: Settings ^> General ^> WSL Integration
+    echo    Activez l'integration WSL2 si disponible
+    echo 5. Essayez de desactiver temporairement le pare-feu pour tester
+    echo 6. Verifiez que le drone Tello est allume et pret
+    echo 7. Si le probleme persiste, redemarrez Docker Desktop
     echo.
     echo Pour voir les logs du conteneur:
     echo   docker logs tello-face-tracking-container
