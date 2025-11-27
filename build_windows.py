@@ -68,13 +68,23 @@ def check_dependencies():
         'djitellopy'
     ]
     
+    # Mapping des noms d'affichage vers les vrais noms d'import
+    import_names = {
+        'PyInstaller': 'PyInstaller',  # S'importe avec la casse
+        'PyQt6': 'PyQt6',              # S'importe avec la casse
+        'cv2': 'cv2',
+        'numpy': 'numpy',
+        'torch': 'torch',
+        'torchvision': 'torchvision',
+        'ultralytics': 'ultralytics',
+        'djitellopy': 'djitellopy'
+    }
+    
     missing = []
     for module in required_modules:
         try:
-            if module == 'cv2':
-                __import__('cv2')
-            else:
-                __import__(module.lower())
+            import_name = import_names.get(module, module)
+            __import__(import_name)
             print(f"✓ {module}")
         except ImportError:
             print(f"❌ {module} - MANQUANT")
