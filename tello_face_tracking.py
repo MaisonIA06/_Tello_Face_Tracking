@@ -400,26 +400,6 @@ class FaceTracker:
             error_msg = str(e)
             print(f"✗ Erreur de connexion: {error_msg}")
             
-            if "state packet" in error_msg.lower():
-                print("\n" + "="*60)
-                print("[ERREUR RESEAU DOCKER]")
-                print("="*60)
-                print("Le conteneur Docker ne peut pas recevoir les paquets d'état UDP du Tello.")
-                print("\nCauses possibles:")
-                print("1. Docker Desktop sur Windows a des limitations avec UDP")
-                print("2. Le pare-feu Windows bloque les ports UDP 8889 et 11111")
-                print("3. Le mode réseau Docker n'est pas configuré correctement")
-                print("\nSolutions à essayer:")
-                print("1. Vérifiez que vous êtes connecté au Wi-Fi du Tello")
-                print("2. Dans Docker Desktop: Settings > General > WSL Integration")
-                print("   Activez l'intégration WSL2 si disponible")
-                print("3. Ajoutez des règles de pare-feu pour les ports UDP:")
-                print("   - Port 8889 (commandes Tello)")
-                print("   - Port 11111 (flux vidéo et état)")
-                print("4. Essayez de redémarrer Docker Desktop")
-                print("5. Si possible, utilisez --network host dans le script de lancement")
-                print("="*60)
-            
             if self.wifi_manager:
                 self.wifi_manager.cleanup()
             sys.exit(1)

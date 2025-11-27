@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from tello_face_tracking import FaceTracker
 from gui.components.tracking_thread import TrackingThread
+from gui.components.init_thread import InitializationThread
 
 
 class TelloFaceTrackingGUI(QMainWindow):
@@ -60,6 +61,7 @@ class TelloFaceTrackingGUI(QMainWindow):
         super().__init__(parent)
         self.tracker: Optional[FaceTracker] = None
         self.tracking_thread: Optional[TrackingThread] = None
+        self.init_thread: Optional[InitializationThread] = None
         
         # Configuration par défaut
         # Détection automatique de Windows : désactiver auto_wifi
@@ -695,33 +697,61 @@ class TelloFaceTrackingGUI(QMainWindow):
         """
         Démarre le tracking.
         """
+        if self.is_tracking:
+            # Si déjà en cours, arrêter d'abord
+            self.stop_tracking()
+            return
+        
         try:
             # Récupération de la configuration
             self.config['tello_ssid'] = self.ssid_input.text() if self.ssid_input.text() else None
             
-            # Création du tracker
-            self.add_log("Initialisation du tracker...", "info")
-            self.tracker = FaceTracker(
-                model_path=self.config['model_path'],
-                conf_threshold=self.config['conf_threshold'],
-                auto_wifi=self.config['auto_wifi'],
-                tello_ssid=self.config['tello_ssid'],
-                gui_mode=True
-            )
+            # Mettre à jour la configuration avec les valeurs des spinboxes
+            self.config['kp_x'] = self.kp_x_spin.value()
+            self.config['kp_y'] = self.kp_y_spin.value()
+            self.config['kd_x'] = self.kd_x_spin.value()
+            self.config['kd_y'] = self.kd_y_spin.value()
+            self.config['max_speed_yaw'] = self.max_speed_yaw_spin.value()
+            self.config['max_speed_vertical'] = self.max_speed_vertical_spin.value()
+            self.config['max_speed_horizontal'] = self.max_speed_horizontal_spin.value()
+            self.config['max_speed_forward'] = self.max_speed_forward_spin.value()
+            self.config['dead_zone'] = self.dead_zone_spin.value()
+            self.config['target_face_size'] = self.target_face_size_spin.value()
             
-            # Application des paramètres avancés
-            self.tracker.kp_x = self.kp_x_spin.value()
-            self.tracker.kp_y = self.kp_y_spin.value()
-            self.tracker.kd_x = self.kd_x_spin.value()
-            self.tracker.kd_y = self.kd_y_spin.value()
-            self.tracker.max_speed_yaw = self.max_speed_yaw_spin.value()
-            self.tracker.max_speed_vertical = self.max_speed_vertical_spin.value()
-            self.tracker.max_speed_horizontal = self.max_speed_horizontal_spin.value()
-            self.tracker.max_speed_forward = self.max_speed_forward_spin.value()
-            self.tracker.dead_zone = self.dead_zone_spin.value()
-            self.tracker.target_face_size = self.target_face_size_spin.value()
+            # Désactiver le bouton pendant l'initialisation
+            self.start_button.setEnabled(False)
+            self.start_button.setText("Initialisation en cours...")
+            self.toolbar_start_action.setEnabled(False)
             
-            # Création et connexion du thread
+            # Afficher un message dans la barre de statut
+            self.statusBar().showMessage("Connexion au drone en cours...")
+            self.add_log("Démarrage de l'initialisation...", "info")
+            
+            # Créer et démarrer le thread d'initialisation
+            self.init_thread = InitializationThread(self.config)
+            self.init_thread.progress_update.connect(self.add_log)
+            self.init_thread.initialization_complete.connect(self.on_tracker_initialized)
+            self.init_thread.initialization_failed.connect(self.on_tracker_init_failed)
+            self.init_thread.finished.connect(self.on_init_thread_finished)
+            self.init_thread.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Impossible de démarrer l'initialisation:\n{str(e)}")
+            self.add_log(f"Erreur: {str(e)}", "error")
+            self.start_button.setEnabled(True)
+            self.start_button.setText("Démarrer le tracking")
+            self.toolbar_start_action.setEnabled(True)
+            self.statusBar().showMessage("Prêt")
+    
+    def on_tracker_initialized(self, tracker):
+        """
+        Callback appelé quand le tracker est initialisé avec succès.
+        """
+        try:
+            self.tracker = tracker
+            self.add_log("Tracker initialisé, démarrage du tracking...", "info")
+            
+            # Création et connexion du thread de tracking
             self.tracking_thread = TrackingThread(self.tracker)
             self.tracking_thread.frame_ready.connect(self.on_frame_received)
             self.tracking_thread.stats_updated.connect(self.on_stats_updated)
@@ -730,11 +760,12 @@ class TelloFaceTrackingGUI(QMainWindow):
             self.tracking_thread.log_message.connect(self.add_log)
             self.tracking_thread.tracking_finished.connect(self.on_tracking_finished)
             
-            # Démarrage du thread
+            # Démarrage du thread de tracking
             self.tracking_thread.start()
             self.is_tracking = True
             
             # Mise à jour de l'interface
+            self.start_button.setEnabled(True)
             self.start_button.setText("Arrêter le tracking")
             self.start_button.setStyleSheet("""
                 QPushButton {
@@ -748,6 +779,7 @@ class TelloFaceTrackingGUI(QMainWindow):
                     background-color: #da190b;
                 }
             """)
+            self.toolbar_start_action.setEnabled(True)
             self.toolbar_start_action.setText("⏹ Arrêter")
             self.takeoff_button.setEnabled(True)
             self.toolbar_takeoff_action.setEnabled(True)
@@ -759,11 +791,56 @@ class TelloFaceTrackingGUI(QMainWindow):
             QMessageBox.critical(self, "Erreur", f"Impossible de démarrer le tracking:\n{str(e)}")
             self.add_log(f"Erreur: {str(e)}", "error")
             self.is_tracking = False
+            self.start_button.setEnabled(True)
+            self.start_button.setText("Démarrer le tracking")
+            self.toolbar_start_action.setEnabled(True)
+            self.statusBar().showMessage("Prêt")
+            if self.tracker:
+                try:
+                    self.tracker.cleanup()
+                except Exception:
+                    pass
+                self.tracker = None
+    
+    def on_tracker_init_failed(self, error_msg: str):
+        """
+        Callback appelé quand l'initialisation échoue.
+        """
+        QMessageBox.critical(self, "Erreur d'initialisation", 
+                        f"Impossible d'initialiser le tracker:\n{error_msg}")
+        self.add_log(f"Erreur d'initialisation: {error_msg}", "error")
+        self.start_button.setEnabled(True)
+        self.start_button.setText("Démarrer le tracking")
+        self.toolbar_start_action.setEnabled(True)
+        self.statusBar().showMessage("Prêt")
+    
+    def on_init_thread_finished(self):
+        """
+        Callback appelé quand le thread d'initialisation se termine.
+        """
+        if self.init_thread:
+            self.init_thread.deleteLater()
+            self.init_thread = None
     
     def stop_tracking(self):
         """
         Arrête le tracking.
         """
+        # Annuler l'initialisation si elle est en cours
+        if self.init_thread and self.init_thread.isRunning():
+            self.add_log("Annulation de l'initialisation...", "info")
+            self.init_thread.cancel()
+            self.init_thread.wait(3000)  # Attendre jusqu'à 3 secondes
+            if self.init_thread.isRunning():
+                self.init_thread.terminate()
+                self.init_thread.wait(1000)
+            self.init_thread = None
+            self.start_button.setEnabled(True)
+            self.start_button.setText("Démarrer le tracking")
+            self.toolbar_start_action.setEnabled(True)
+            self.statusBar().showMessage("Prêt")
+            return
+        
         if self.tracking_thread:
             # Demander l'arrêt du thread
             self.tracking_thread.stop()
