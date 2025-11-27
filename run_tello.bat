@@ -18,13 +18,16 @@ REM Nom de l'image
 set IMAGE_NAME=tello-face-tracking
 
 REM Vérifier si l'image existe, sinon la construire
-docker inspect %IMAGE_NAME% >nul 2>&1
+docker images %IMAGE_NAME% --format "{{.Repository}}:{{.Tag}}" | findstr /C:"%IMAGE_NAME%:latest" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [INFO] L'image %IMAGE_NAME% n'existe pas. Construction en cours...
     echo Cela peut prendre quelques minutes la premiere fois.
     docker build -t %IMAGE_NAME% .
+    REM Vérifier si l'image a été créée avec succès
+    docker images %IMAGE_NAME% --format "{{.Repository}}:{{.Tag}}" | findstr /C:"%IMAGE_NAME%:latest" >nul 2>&1
     if %errorlevel% neq 0 (
         echo [ERREUR] La construction de l'image a echoue.
+        echo Verifiez les messages d'erreur ci-dessus.
         pause
         exit /b 1
     )
@@ -34,11 +37,14 @@ if %errorlevel% neq 0 (
     set /p REBUILD="Voulez-vous la reconstruire ? (o/N) "
     if /i "%REBUILD%"=="o" (
         docker build -t %IMAGE_NAME% .
+        docker images %IMAGE_NAME% --format "{{.Repository}}:{{.Tag}}" | findstr /C:"%IMAGE_NAME%:latest" >nul 2>&1
         if %errorlevel% neq 0 (
             echo [ERREUR] La reconstruction de l'image a echoue.
+            echo Verifiez les messages d'erreur ci-dessus.
             pause
             exit /b 1
         )
+        echo [SUCCES] Image reconstruite avec succes.
     )
 )
 
