@@ -13,6 +13,7 @@ from typing import Optional, Tuple, Dict, Any
 import sys
 import os
 import subprocess
+import platform
 
 # Ne pas forcer xcb ici car cela peut causer des conflits avec PyQt6
 # La configuration Qt sera gérée par PyQt6 si nécessaire
@@ -311,11 +312,20 @@ class FaceTracker:
         Args:
             model_path: Chemin vers le modèle YOLO-face (.pt)
             conf_threshold: Seuil de confiance pour la détection (0.0-1.0)
-            auto_wifi: Active la gestion automatique Wi-Fi (True par défaut)
+            auto_wifi: Active la gestion automatique Wi-Fi (True par défaut, forcé à False sous Windows)
             tello_ssid: SSID du réseau Tello (si None, sera détecté automatiquement)
             gui_mode: Active le mode GUI (désactive les prompts interactifs)
         """
         self.gui_mode = gui_mode
+        
+        # Détection automatique de Windows : désactiver la gestion WiFi automatique
+        # La gestion WiFi automatique utilise nmcli (Linux uniquement)
+        if platform.system() == "Windows" and auto_wifi:
+            print("\n=== Plateforme Windows détectée ===")
+            print("La gestion automatique Wi-Fi est désactivée sous Windows.")
+            print("Veuillez vous connecter manuellement au réseau Wi-Fi du Tello avant de continuer.")
+            print("=" * 50 + "\n")
+            auto_wifi = False
         # Gestionnaire Wi-Fi automatique
         self.wifi_manager = None
         if auto_wifi:

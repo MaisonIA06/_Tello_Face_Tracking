@@ -34,6 +34,12 @@ MANIFEST
 # Garder tello_face_tracking.spec car c'est un fichier de configuration du projet
 # *.spec
 
+# Build artifacts (PyInstaller)
+build/
+dist/
+*.pyc
+__pycache__/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

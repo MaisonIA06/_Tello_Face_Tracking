@@ -6,6 +6,7 @@ Interface graphique PyQt6 pour le tracking de visage avec le drone Tello.
 
 import sys
 import os
+import platform
 from typing import Optional, Dict, Any
 from pathlib import Path
 
@@ -61,10 +62,12 @@ class TelloFaceTrackingGUI(QMainWindow):
         self.tracking_thread: Optional[TrackingThread] = None
         
         # Configuration par défaut
+        # Détection automatique de Windows : désactiver auto_wifi
+        is_windows = platform.system() == "Windows"
         self.config = {
             'model_path': 'yolov8n-face.pt',
             'conf_threshold': 0.25,
-            'auto_wifi': True,
+            'auto_wifi': not is_windows,  # Désactivé sous Windows (pas de nmcli)
             'tello_ssid': None,
             'kp_x': 0.15,
             'kp_y': 0.12,
@@ -220,9 +223,20 @@ class TelloFaceTrackingGUI(QMainWindow):
         wifi_group = QGroupBox("Configuration Wi-Fi")
         wifi_layout = QVBoxLayout()
         
-        self.auto_wifi_checkbox = QCheckBox("Connexion Wi-Fi automatique")
+        # Message d'information sous Windows
+        if platform.system() == "Windows":
+            windows_wifi_info = QLabel("⚠ Windows détecté : Connectez-vous manuellement au WiFi du Tello avant de démarrer.")
+            windows_wifi_info.setWordWrap(True)
+            windows_wifi_info.setStyleSheet("color: #FF6B35; font-weight: bold; padding: 5px;")
+            wifi_layout.addWidget(windows_wifi_info)
+        
+        self.auto_wifi_checkbox = QCheckBox("Connexion Wi-Fi automatique (Linux uniquement)")
         self.auto_wifi_checkbox.setChecked(self.config['auto_wifi'])
         self.auto_wifi_checkbox.toggled.connect(self.on_auto_wifi_toggled)
+        # Désactiver sous Windows
+        if platform.system() == "Windows":
+            self.auto_wifi_checkbox.setEnabled(False)
+            self.auto_wifi_checkbox.setToolTip("La gestion WiFi automatique n'est disponible que sous Linux")
         wifi_layout.addWidget(self.auto_wifi_checkbox)
         
         ssid_hbox = QHBoxLayout()

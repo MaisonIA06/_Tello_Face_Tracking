@@ -18,10 +18,13 @@ project_root = Path(os.getcwd()).absolute()
 model_path = project_root / 'yolov8n-face.pt'
 
 # Préparer la liste des données à inclure
+# NOTE: Le modèle YOLO n'est PAS inclus dans l'exécutable
+# L'utilisateur doit le placer manuellement à côté de l'exécutable
+# Cela réduit la taille de l'exécutable et permet des mises à jour du modèle
 datas_list = []
-if model_path.exists():
-    # Inclure le modèle YOLO dans le répertoire racine du bundle
-    datas_list.append((str(model_path), '.'))
+# if model_path.exists():
+#     # Option: inclure le modèle YOLO dans le répertoire racine du bundle
+#     datas_list.append((str(model_path), '.'))
 
 a = Analysis(
     ['run_gui.py'],

@@ -1,0 +1,172 @@
+# Exemple de workflow GitHub Actions pour build automatique Windows
+# 
+# Pour utiliser ce fichier :
+# 1. Créez le dossier .github/workflows/ à la racine du projet
+# 2. Copiez ce fichier dans .github/workflows/build-windows.yml
+# 3. Commitez et pushez
+# 4. Créez un tag : git tag v1.0.0 && git push --tags
+# 5. Le build se lance automatiquement et crée une release
+
+name: Build Windows Executable
+
+on:
+  # Déclencher sur les tags de version
+  push:
+    tags:
+      - 'v*'
+  
+  # Permettre le déclenchement manuel
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build:
+    name: Build Windows Executable
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Run build script
+      run: python build_windows.py
+      
+    - name: Verify build
+      run: |
+        if (Test-Path dist/TelloFaceTracking.exe) {
+          Write-Host "✓ Executable created successfully"
+          $size = (Get-Item dist/TelloFaceTracking.exe).Length / 1MB
+          Write-Host "Size: $($size) MB"
+        } else {
+          Write-Error "❌ Executable not found"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: Create checksums
+      run: |
+        cd dist
+        Get-FileHash TelloFaceTracking.exe -Algorithm SHA256 | Format-List > checksums.txt
+        cat checksums.txt
+      shell: pwsh
+    
+    - name: Copy documentation
+      run: |
+        Copy-Item README_WINDOWS.md dist/
+        Copy-Item CHANGELOG_WINDOWS.md dist/
+        Copy-Item QUICK_START_WINDOWS.md dist/
+    
+    - name: Create ZIP archive
+      run: |
+        $version = "${{ github.ref_name }}" -replace 'v',''
+        Compress-Archive -Path dist/* -DestinationPath "TelloFaceTracking-$version-Windows.zip"
+      shell: pwsh
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TelloFaceTracking-Windows
+        path: |
+          TelloFaceTracking-*.zip
+          dist/checksums.txt
+        retention-days: 30
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          TelloFaceTracking-*.zip
+          dist/checksums.txt
+        body_path: RELEASE_NOTES_TEMPLATE.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job optionnel : Tester l'exécutable
+  test:
+    name: Test Executable
+    needs: build
+    runs-on: windows-latest
+    
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: TelloFaceTracking-Windows
+    
+    - name: Extract and test
+      run: |
+        # Extraire le ZIP
+        Expand-Archive -Path TelloFaceTracking-*.zip -DestinationPath test/
+        
+        # Vérifier que l'exe existe
+        if (Test-Path test/TelloFaceTracking.exe) {
+          Write-Host "✓ Executable found in archive"
+        } else {
+          Write-Error "❌ Executable not found in archive"
+          exit 1
+        }
+        
+        # Vérifier que les fichiers d'instructions sont présents
+        if (Test-Path test/LISEZMOI.txt) {
+          Write-Host "✓ LISEZMOI.txt found"
+        } else {
+          Write-Warning "⚠ LISEZMOI.txt not found"
+        }
+        
+        # TODO: Ajouter des tests plus avancés ici si nécessaire
+        # Par exemple : lancer l'exe avec des paramètres de test
+        
+      shell: pwsh
+
+# Notes :
+# 
+# 1. Ce workflow se déclenche sur les tags de version (v1.0.0, v2.1.3, etc.)
+#    Pour créer une release :
+#    $ git tag v1.0.0
+#    $ git push origin v1.0.0
+# 
+# 2. Vous pouvez aussi déclencher manuellement depuis l'onglet Actions
+# 
+# 3. L'artefact est conservé 30 jours sur GitHub
+# 
+# 4. La release est créée automatiquement sur GitHub avec le ZIP
+# 
+# 5. Pour personnaliser :
+#    - Modifiez RELEASE_NOTES_TEMPLATE.md pour changer le contenu de la release
+#    - Ajoutez des secrets GitHub si besoin (ex: certificat de signature)
+#    - Ajoutez des étapes de test plus poussées dans le job 'test'
+# 
+# 6. Pour signer le code (optionnel, évite les avertissements Windows) :
+#    - Obtenez un certificat de signature de code
+#    - Ajoutez-le comme secret GitHub
+#    - Ajoutez une étape de signature après le build
+# 
+# 7. Variables d'environnement disponibles :
+#    - ${{ github.ref_name }} : Nom du tag (ex: v1.0.0)
+#    - ${{ github.sha }} : Hash du commit
+#    - ${{ github.repository }} : Nom du repo
+# 
+# 8. Pour inclure le modèle YOLO dans la release :
+#    - Ajoutez yolov8n-face.pt au repository
+#    - Ou ajoutez une étape de téléchargement depuis une URL
+#    - Puis ajoutez-le dans files: de Create Release
+
