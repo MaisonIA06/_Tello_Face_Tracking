@@ -305,7 +305,7 @@ class FaceTracker:
     
     def __init__(self, model_path: str = "yolov8n-face.pt", conf_threshold: float = 0.25, 
                  auto_wifi: bool = True, tello_ssid: Optional[str] = None,
-                 gui_mode: bool = False):
+                 gui_mode: bool = False, detection_resolution: Tuple[int, int] = (640, 480)):
         """
         Initialise le tracker de visage.
         
@@ -315,6 +315,7 @@ class FaceTracker:
             auto_wifi: Active la gestion automatique Wi-Fi (True par défaut, forcé à False sous Windows)
             tello_ssid: SSID du réseau Tello (si None, sera détecté automatiquement)
             gui_mode: Active le mode GUI (désactive les prompts interactifs)
+            detection_resolution: Résolution pour la détection YOLO (largeur, hauteur). Plus petit = plus rapide.
         """
         self.gui_mode = gui_mode
         
@@ -590,6 +591,11 @@ class FaceTracker:
         self.rc_command_counter = 0
         self.rc_command_interval = 3
         
+        # OPTIMISATION : Résolution pour la détection YOLO (plus petit = plus rapide)
+        self.detection_width, self.detection_height = detection_resolution
+        self.frame_skip_interval = 2  # Traiter 1 frame sur 2 pour améliorer les performances
+        self._last_face_info = None  # Cache pour la dernière détection
+        
         # Flag pour éviter les appels multiples de cleanup
         self._cleaning = False
         
@@ -629,8 +635,25 @@ class FaceTracker:
             Tuple (x_center, y_center, width, height) du visage détecté,
             ou None si aucun visage n'est détecté
         """
-        # Exécution de la détection YOLO
-        results = self.model(frame, conf=self.conf_threshold, verbose=False)
+        # OPTIMISATION : Redimensionner la frame pour accélérer YOLO
+        # Garder les dimensions originales pour le calcul des coordonnées
+        original_h, original_w = frame.shape[:2]
+        
+        # Redimensionner à une résolution plus petite pour YOLO
+        # Cela accélère considérablement la détection (4x plus rapide pour 640x480 vs 1280x720)
+        target_width = self.detection_width
+        target_height = self.detection_height
+        
+        # Calculer le ratio de redimensionnement
+        scale_x = original_w / target_width
+        scale_y = original_h / target_height
+        
+        # Redimensionner la frame pour YOLO
+        small_frame = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+        
+        # Exécution de la détection YOLO sur la frame réduite
+        # Utiliser imgsz pour correspondre à notre redimensionnement
+        results = self.model(small_frame, conf=self.conf_threshold, imgsz=target_width, verbose=False)
         
         # Extraction des détections
         if len(results) > 0 and len(results[0].boxes) > 0:
@@ -646,15 +669,15 @@ class FaceTracker:
             largest_idx = np.argmax(areas)
             box = boxes[largest_idx]
             
-            # Coordonnées de la bounding box
+            # Coordonnées de la bounding box (sur la frame réduite)
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
             confidence = box.conf[0].cpu().numpy()
             
-            # Calcul du centre et des dimensions
-            x_center = int((x1 + x2) / 2)
-            y_center = int((y1 + y2) / 2)
-            width = int(x2 - x1)
-            height = int(y2 - y1)
+            # Convertir les coordonnées de la frame réduite vers la frame originale
+            x_center = int((x1 + x2) / 2 * scale_x)
+            y_center = int((y1 + y2) / 2 * scale_y)
+            width = int((x2 - x1) * scale_x)
+            height = int((y2 - y1) * scale_y)
             
             return (x_center, y_center, width, height, confidence)
         
@@ -872,6 +895,9 @@ class FaceTracker:
         # État du drone
         is_flying = False
         
+        # OPTIMISATION : Compteur pour sauter des frames (traiter 1 frame sur N)
+        frame_skip_counter = 0
+        
         try:
             while True:
                 # Récupération de la frame
@@ -879,8 +905,20 @@ class FaceTracker:
                 if frame is None:
                     continue
                 
-                # Détection du visage
-                face_info = self.detect_face(frame)
+                # OPTIMISATION : Sauter certaines frames pour la détection
+                # Cela améliore les performances en traitant moins de frames
+                frame_skip_counter += 1
+                should_detect = (frame_skip_counter % self.frame_skip_interval == 0)
+                
+                # Détection du visage (seulement toutes les N frames)
+                if should_detect:
+                    face_info = self.detect_face(frame)
+                    # Sauvegarder la dernière détection pour les frames sautées
+                    if face_info is not None:
+                        self._last_face_info = face_info
+                else:
+                    # Réutiliser la dernière détection pour les frames sautées
+                    face_info = self._last_face_info
                 
                 # Calcul des commandes de contrôle
                 if face_info is not None:
