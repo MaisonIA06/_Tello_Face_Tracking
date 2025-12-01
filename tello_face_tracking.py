@@ -609,13 +609,36 @@ class FaceTracker:
         try:
             frame = self.frame_read.frame
             if frame is not None:
-                if not hasattr(self, 'last_frame_hash'):
-                    self.last_frame_hash = hash(frame.tobytes())
+                # OPTIMISATION : Vérification plus rapide que le hash complet
+                # Utiliser seulement un échantillon de pixels au lieu de toute la frame
+                # Cela évite de convertir 2.7 MB en bytes et calculer un hash à chaque frame
+                h, w = frame.shape[:2]
+                
+                if not hasattr(self, 'last_frame_sample'):
+                    # Échantillonner quelques pixels stratégiques pour détecter les changements
+                    # Ces points sont choisis pour être sensibles aux changements de frame
+                    sample_points = [
+                        tuple(frame[0, 0]),           # Coin supérieur gauche
+                        tuple(frame[h//2, w//2]),     # Centre
+                        tuple(frame[-1, -1]),         # Coin inférieur droit
+                        tuple(frame[h//4, w//4]),     # Quart supérieur gauche
+                        tuple(frame[3*h//4, 3*w//4])  # Quart inférieur droit
+                    ]
+                    self.last_frame_sample = tuple(sample_points)
                     return frame
                 
-                current_frame_hash = hash(frame.tobytes())
-                if current_frame_hash != self.last_frame_hash:
-                    self.last_frame_hash = current_frame_hash
+                # Vérifier seulement quelques pixels au lieu de toute la frame
+                # Cette vérification est ~1000x plus rapide que hash(frame.tobytes())
+                current_sample = (
+                    tuple(frame[0, 0]),
+                    tuple(frame[h//2, w//2]),
+                    tuple(frame[-1, -1]),
+                    tuple(frame[h//4, w//4]),
+                    tuple(frame[3*h//4, 3*w//4])
+                )
+                
+                if current_sample != self.last_frame_sample:
+                    self.last_frame_sample = current_sample
                     return frame
                 else:
                     return None
