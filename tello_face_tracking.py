@@ -602,6 +602,9 @@ class FaceTracker:
         # Paramètres de contrôle
         self.center_x = 0  # Centre horizontal de l'image (sera mis à jour)
         self.center_y = 0  # Centre vertical de l'image (sera mis à jour)
+
+        # Hauteur maximale du drone
+        self.max_height_cm = 200
         
         # Paramètres PID pour le contrôle du drone
         # Ces valeurs peuvent être ajustées selon les besoins
@@ -778,6 +781,17 @@ class FaceTracker:
         d_y = self.kd_y * (error_y - self.last_error_y)
         up_down = int(p_y + d_y)
         
+        # Si le drone est trop haut, ne pas monter
+        try:
+            current_height = self.tello.get_height()
+            if current_height > self.max_height_cm and up_down > 0:
+                up_down = 0
+                print(f"Hauteur maximale atteinte: {current_height} cm")
+        except Exception as e:
+            print(f"Erreur lors de la récupération de l'altitude: {e}")
+            pass
+
+
         # Contrôle pour le mouvement avant/arrière basé sur la taille du visage
         # Si le visage est trop petit, avancer. Si trop grand, reculer.
         # Coefficient augmenté pour des mouvements plus rapides
@@ -866,12 +880,22 @@ class FaceTracker:
         
         # Affichage des informations de contrôle
         left_right, forward_backward, up_down, yaw = velocity
+        try:
+            current_height = self.tello.get_height()
+            height_text = f"Hauteur: {current_height} cm"
+            if current_height >= self.max_height_cm:
+                height_text += " (MAX)"
+        except Exception as e:
+            height_text = "Hauteur: N/A"
+            
         info_text = [
+            height_text,
             f"FPS: {self.fps:.1f}",
             f"Gauche/Droite: {left_right} cm/s",
             f"Avant/Arriere: {forward_backward} cm/s",
             f"Monter/Descendre: {-up_down} cm/s",
             f"Rotation: {yaw} deg/s",
+            height_text,
             f"Batterie: {self.tello.get_battery()}%"
         ]
         
@@ -996,13 +1020,20 @@ class FaceTracker:
                     # up_down_velocity: mouvement vertical (cm/s), positif = monter
                     # yaw_velocity: rotation (deg/s), positif = tourner à droite
                     
+                    # Si le drone est trop haut, ne pas monter
+                    try:
+                        current_height = self.tello.get_height()
+                        if current_height > self.max_height_cm and up_down > 0:
+                            up_down = 0
+                    except Exception as e:
+                        pass
+
                     # Pour centrer le visage:
                     # - Horizontal: mouvement latéral (gauche/droite) + rotation légère
                     # - Vertical: monter/descendre
                     # - Distance: avancer/reculer selon la taille du visage
                     self.rc_command_counter += 1
                     if self.rc_command_counter >= self.rc_command_interval:
-                        if left_right != 0 or forward_backward != 0 or up_down != 0 or yaw != 0:
                             self.tello.send_rc_control(
                                 left_right_velocity=left_right,      # Mouvement latéral (gauche/droite)
                                 forward_backward_velocity=forward_backward,  # Avancer/reculer
