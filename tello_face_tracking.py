@@ -420,21 +420,124 @@ class FaceTracker:
             print("Continuons quand même...")
         
         # Configuration du flux vidéo
+        # Initialisation d'une variable pour stocker le VideoCapture Windows si nécessaire
+        self._windows_video_cap = None
+        
         try:
             self.tello.streamon()
-            self.frame_read = self.tello.get_frame_read()
+            
+            # Correction pour Windows : contourner le problème de bind() [Errno 10014]
+            if platform.system() == "Windows":
+                print("Mode compatibilité Windows activé pour le flux vidéo...")
+                tello_ip = "192.168.10.1"
+                
+                # Essayer différents formats compatibles Windows
+                formats_to_try = [
+                    f"udp://{tello_ip}:11111",
+                    f"udp://@{tello_ip}:11111",
+                    f"udp://0.0.0.0:11111",
+                ]
+                
+                cap = None
+                for fmt in formats_to_try:
+                    try:
+                        cap = cv2.VideoCapture(fmt, cv2.CAP_FFMPEG)
+                        if cap.isOpened():
+                            # Tester en lisant une frame
+                            ret, test_frame = cap.read()
+                            if ret and test_frame is not None:
+                                print(f"✓ Flux vidéo ouvert avec le format: {fmt}")
+                                break
+                        if cap:
+                            cap.release()
+                        cap = None
+                    except Exception as fmt_error:
+                        if cap:
+                            cap.release()
+                        cap = None
+                        continue
+                
+                if cap and cap.isOpened():
+                    # Créer un wrapper compatible avec frame_read.frame
+                    class WindowsFrameRead:
+                        def __init__(self, cap):
+                            self.cap = cap
+                            
+                        @property
+                        def frame(self):
+                            ret, frame = self.cap.read()
+                            return frame if ret else None
+                    
+                    self.frame_read = WindowsFrameRead(cap)
+                    self._windows_video_cap = cap  # Garder une référence pour le cleanup
+                else:
+                    # Fallback : utiliser la méthode standard (peut échouer)
+                    print("⚠ Tentative avec la méthode standard djitellopy...")
+                    self.frame_read = self.tello.get_frame_read()
+            else:
+                # Linux/Mac : méthode standard
+                self.frame_read = self.tello.get_frame_read()
+                
         except Exception as e:
+            error_str = str(e).lower()
             print(f"Erreur lors du démarrage du flux vidéo: {e}")
-            if "bind failed" in str(e).lower() or "adresse déjà utilisée" in str(e).lower():
-                print("Le port du flux vidéo est déjà utilisé.")
-                print("Essayez de redémarrer le programme ou attendez quelques secondes.")
+            
+            # Détecter les erreurs de bind (Windows Errno 10014 ou Linux "bind failed")
+            if "bind failed" in error_str or "adresse déjà utilisée" in error_str or "10014" in str(e) or "wsaefault" in error_str:
+                print("Le port du flux vidéo est déjà utilisé ou format d'adresse incompatible.")
+                print("Tentative de correction pour Windows...")
+                
                 # Essayer de nettoyer d'abord
                 try:
                     self.tello.streamoff()
                     time.sleep(1)
                     self.tello.streamon()
-                    self.frame_read = self.tello.get_frame_read()
-                    print("Flux vidéo redémarré avec succès.")
+                    
+                    # Réessayer avec la méthode Windows si on est sous Windows
+                    if platform.system() == "Windows":
+                        tello_ip = "192.168.10.1"
+                        formats_to_try = [
+                            f"udp://{tello_ip}:11111",
+                            f"udp://@{tello_ip}:11111",
+                            f"udp://0.0.0.0:11111",
+                        ]
+                        
+                        cap = None
+                        for fmt in formats_to_try:
+                            try:
+                                cap = cv2.VideoCapture(fmt, cv2.CAP_FFMPEG)
+                                if cap.isOpened():
+                                    ret, test_frame = cap.read()
+                                    if ret and test_frame is not None:
+                                        print(f"✓ Flux vidéo redémarré avec le format: {fmt}")
+                                        break
+                                if cap:
+                                    cap.release()
+                                cap = None
+                            except Exception:
+                                if cap:
+                                    cap.release()
+                                cap = None
+                                continue
+                        
+                        if cap and cap.isOpened():
+                            class WindowsFrameRead:
+                                def __init__(self, cap):
+                                    self.cap = cap
+                                @property
+                                def frame(self):
+                                    ret, frame = self.cap.read()
+                                    return frame if ret else None
+                            self.frame_read = WindowsFrameRead(cap)
+                            self._windows_video_cap = cap
+                            print("Flux vidéo redémarré avec succès (mode Windows).")
+                        else:
+                            raise Exception("Impossible d'ouvrir le flux vidéo avec OpenCV")
+                    else:
+                        # Linux/Mac : réessayer la méthode standard
+                        self.frame_read = self.tello.get_frame_read()
+                        print("Flux vidéo redémarré avec succès.")
+                        
                 except Exception as e2:
                     print(f"Impossible de redémarrer le flux: {e2}")
                     if not self.gui_mode:
@@ -906,6 +1009,16 @@ class FaceTracker:
         
         # Arrêt du flux vidéo et fermeture de la connexion
         try:
+            # Fermer le VideoCapture Windows si présent
+            if hasattr(self, '_windows_video_cap') and self._windows_video_cap is not None:
+                try:
+                    self._windows_video_cap.release()
+                    print("Flux vidéo Windows fermé.")
+                except Exception as e:
+                    print(f"Erreur lors de la fermeture du flux vidéo Windows (peut être ignorée): {e}")
+                finally:
+                    self._windows_video_cap = None
+            
             if hasattr(self, 'tello') and self.tello is not None:
                 try:
                     self.tello.streamoff()
