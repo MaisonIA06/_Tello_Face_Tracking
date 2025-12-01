@@ -14,6 +14,7 @@ import sys
 import os
 import subprocess
 import platform
+import threading
 
 # Ne pas forcer xcb ici car cela peut causer des conflits avec PyQt6
 # La configuration Qt sera gérée par PyQt6 si nécessaire
@@ -53,6 +54,69 @@ def get_resource_path(relative_path: str) -> str:
         base_path = os.path.dirname(os.path.abspath(__file__))
     
     return os.path.join(base_path, relative_path)
+
+
+class WindowsFrameRead:
+    """
+    Wrapper optimisé pour la lecture de frames sous Windows.
+    Utilise un thread en arrière-plan pour lire les frames dans un buffer,
+    évitant ainsi les appels bloquants et améliorant les performances.
+    """
+    def __init__(self, cap, timeout: float = 5.0):
+        """
+        Initialise le lecteur de frames avec buffer.
+        
+        Args:
+            cap: Objet cv2.VideoCapture
+            timeout: Timeout en secondes pour l'initialisation
+        """
+        self.cap = cap
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
+        self.running = True
+        self.frame_available = threading.Event()
+        
+        # Thread pour lire les frames en arrière-plan
+        self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
+        self.read_thread.start()
+        
+        # Attendre que la première frame soit disponible
+        if self.frame_available.wait(timeout=timeout):
+            print("✓ Buffer de frames Windows initialisé")
+        else:
+            print("⚠ Attention: Timeout lors de l'initialisation du buffer")
+    
+    def _read_loop(self):
+        """Boucle de lecture des frames en arrière-plan"""
+        while self.running:
+            try:
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    with self.frame_lock:
+                        self.latest_frame = frame
+                        self.frame_available.set()
+                else:
+                    # Si la lecture échoue, attendre un peu avant de réessayer
+                    time.sleep(0.01)
+            except Exception as e:
+                # En cas d'erreur, continuer la boucle
+                time.sleep(0.01)
+                continue
+    
+    @property
+    def frame(self):
+        """Retourne la dernière frame disponible (non-bloquant)"""
+        with self.frame_lock:
+            if self.latest_frame is not None:
+                # Retourner une copie pour éviter les problèmes de concurrence
+                return self.latest_frame.copy()
+            return None
+    
+    def stop(self):
+        """Arrête le thread de lecture"""
+        self.running = False
+        if self.read_thread.is_alive():
+            self.read_thread.join(timeout=2.0)
 
 
 class TelloWiFiManager:
@@ -459,16 +523,8 @@ class FaceTracker:
                         continue
                 
                 if cap and cap.isOpened():
-                    # Créer un wrapper compatible avec frame_read.frame
-                    class WindowsFrameRead:
-                        def __init__(self, cap):
-                            self.cap = cap
-                            
-                        @property
-                        def frame(self):
-                            ret, frame = self.cap.read()
-                            return frame if ret else None
-                    
+                    # OPTIMISATION : Utiliser un thread pour lire les frames en arrière-plan
+                    # Cela évite les appels bloquants et améliore considérablement les performances
                     self.frame_read = WindowsFrameRead(cap)
                     self._windows_video_cap = cap  # Garder une référence pour le cleanup
                 else:
@@ -522,14 +578,8 @@ class FaceTracker:
                                 continue
                         
                         if cap and cap.isOpened():
-                            class WindowsFrameRead:
-                                def __init__(self, cap):
-                                    self.cap = cap
-                                @property
-                                def frame(self):
-                                    ret, frame = self.cap.read()
-                                    return frame if ret else None
-                            self.frame_read = WindowsFrameRead(cap)
+                            # Utiliser la classe WindowsFrameRead optimisée avec thread
+                            self.frame_read = WindowsFrameRead(cap, timeout=3.0)
                             self._windows_video_cap = cap
                             print("Flux vidéo redémarré avec succès (mode Windows).")
                         else:
@@ -609,36 +659,13 @@ class FaceTracker:
         try:
             frame = self.frame_read.frame
             if frame is not None:
-                # OPTIMISATION : Vérification plus rapide que le hash complet
-                # Utiliser seulement un échantillon de pixels au lieu de toute la frame
-                # Cela évite de convertir 2.7 MB en bytes et calculer un hash à chaque frame
-                h, w = frame.shape[:2]
-                
-                if not hasattr(self, 'last_frame_sample'):
-                    # Échantillonner quelques pixels stratégiques pour détecter les changements
-                    # Ces points sont choisis pour être sensibles aux changements de frame
-                    sample_points = [
-                        tuple(frame[0, 0]),           # Coin supérieur gauche
-                        tuple(frame[h//2, w//2]),     # Centre
-                        tuple(frame[-1, -1]),         # Coin inférieur droit
-                        tuple(frame[h//4, w//4]),     # Quart supérieur gauche
-                        tuple(frame[3*h//4, 3*w//4])  # Quart inférieur droit
-                    ]
-                    self.last_frame_sample = tuple(sample_points)
+                if not hasattr(self, 'last_frame_hash'):
+                    self.last_frame_hash = hash(frame.tobytes())
                     return frame
                 
-                # Vérifier seulement quelques pixels au lieu de toute la frame
-                # Cette vérification est ~1000x plus rapide que hash(frame.tobytes())
-                current_sample = (
-                    tuple(frame[0, 0]),
-                    tuple(frame[h//2, w//2]),
-                    tuple(frame[-1, -1]),
-                    tuple(frame[h//4, w//4]),
-                    tuple(frame[3*h//4, 3*w//4])
-                )
-                
-                if current_sample != self.last_frame_sample:
-                    self.last_frame_sample = current_sample
+                current_frame_hash = hash(frame.tobytes())
+                if current_frame_hash != self.last_frame_hash:
+                    self.last_frame_hash = current_frame_hash
                     return frame
                 else:
                     return None
@@ -1070,6 +1097,16 @@ class FaceTracker:
         
         # Arrêt du flux vidéo et fermeture de la connexion
         try:
+            # Arrêter le thread de lecture Windows si présent
+            if hasattr(self, 'frame_read') and self.frame_read is not None:
+                # Vérifier si c'est notre WindowsFrameRead avec thread
+                if hasattr(self.frame_read, 'stop'):
+                    try:
+                        self.frame_read.stop()
+                        print("Thread de lecture Windows arrêté.")
+                    except Exception as e:
+                        print(f"Erreur lors de l'arrêt du thread (peut être ignorée): {e}")
+            
             # Fermer le VideoCapture Windows si présent
             if hasattr(self, '_windows_video_cap') and self._windows_video_cap is not None:
                 try:
