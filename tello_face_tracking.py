@@ -604,7 +604,7 @@ class FaceTracker:
         self.center_y = 0  # Centre vertical de l'image (sera mis à jour)
 
         # Hauteur maximale du drone
-        self.max_height_cm = 200
+        self.max_height_cm = 180
         
         # Paramètres PID pour le contrôle du drone
         # Ces valeurs peuvent être ajustées selon les besoins
@@ -618,14 +618,19 @@ class FaceTracker:
         self.last_error_x = 0
         self.last_error_y = 0
         
-        # Vitesse maximale du drone - augmentées pour des mouvements plus rapides
+        # Variables pour la gestion des latences
+        self.last_control_time = time.time() # Temps de la dernière commande de contrôle
+        self.expected_frame_time = 1.0 / 30.0 # Temps attendu pour une frame
+        self.max_dt = 0.5 # Temps maximal de latence accepté
+
+        # Vitesse maximale du drone
         self.max_speed_yaw = 30      # deg/s pour la rotation
         self.max_speed_vertical = 30  # cm/s pour le mouvement vertical
         self.max_speed_horizontal = 40  # cm/s pour le mouvement latéral (gauche/droite) - augmenté
         self.max_speed_forward = 50     # cm/s pour le mouvement avant/arrière - augmenté significativement
         
-        # Zone morte (dead zone) pour éviter les micro-mouvements - augmentée
-        self.dead_zone = 40  # pixels (augmenté de 20 à 40 pour réduire les micro-corrections)
+        # Zone morte (dead zone) pour éviter les micro-mouvements
+        self.dead_zone = 40  # pixels 
         
         # Taille cible du visage (en pixels) pour le contrôle avant/arrière
         self.target_face_size = 150  # Taille cible du visage en pixels (ajustable)
@@ -764,6 +769,17 @@ class FaceTracker:
         if abs(error_size) < self.face_size_tolerance:
             error_size = 0
         
+        # Calcul du temps écoulé depuis la dernière commande
+        current_time = time.time()
+        dt = current_time - self.last_control_time
+        
+        # Protection contre les valeurs aberrantes (première frame ou latence excessive)
+        if dt <= 0 or dt > self.max_dt:
+            dt = self.expected_frame_time  # Utiliser le temps attendu par défaut
+        
+        # Normaliser le temps pour un FPS de référence (30 FPS)
+        dt_normalized = dt / self.expected_frame_time
+        
         # Détection d'oscillations : si l'erreur change de signe rapidement, réduire la réactivité
         oscillation_x = (error_x * self.last_error_x < 0) if self.last_error_x != 0 else False
         oscillation_y = (error_y * self.last_error_y < 0) if self.last_error_y != 0 else False
@@ -771,14 +787,22 @@ class FaceTracker:
         # Facteur de réduction si oscillation détectée
         damping_factor = 0.5 if (oscillation_x or oscillation_y) else 1.0
         
+        # Facteur de réduction supplémentaire si latence élevée détectée
+        # Plus la latence est élevée, plus on réduit la réactivité pour éviter les sur-corrections
+        latency_factor = 1.0
+        if dt > self.expected_frame_time * 2:  # Si latence > 2x le temps attendu
+            latency_factor = min(1.0, self.expected_frame_time * 2 / dt)
+        
         # Contrôle PID pour le mouvement horizontal (gauche/droite)
-        p_x = self.kp_x * error_x * damping_factor
-        d_x = self.kd_x * (error_x - self.last_error_x)
+        p_x = self.kp_x * error_x * damping_factor * latency_factor
+        # Dérivée normalisée par le temps écoulé
+        d_x = self.kd_x * (error_x - self.last_error_x) / dt_normalized
         left_right = int(p_x + d_x)
         
         # Contrôle PID pour le mouvement vertical (monter/descendre)
-        p_y = self.kp_y * error_y * damping_factor
-        d_y = self.kd_y * (error_y - self.last_error_y)
+        p_y = self.kp_y * error_y * damping_factor * latency_factor
+        # Dérivée normalisée par le temps écoulé
+        d_y = self.kd_y * (error_y - self.last_error_y) / dt_normalized
         up_down = int(p_y + d_y)
         
         # Si le drone est trop haut, ne pas monter
@@ -820,6 +844,9 @@ class FaceTracker:
         # Mise à jour des erreurs précédentes
         self.last_error_x = error_x
         self.last_error_y = error_y
+
+        # Mise à jour du temps de contrôle
+        self.last_control_time = current_time
         
         return (left_right, forward_backward, up_down, yaw)
     
