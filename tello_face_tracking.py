@@ -314,7 +314,7 @@ class TelloWiFiManager:
             True si la restauration réussit, False sinon
         """
         if not self.is_connected_to_tello:
-            return True  # Rien à restaurer
+            return True
         
         if self.original_connection is None:
             print("Aucune connexion précédente à restaurer.")
@@ -434,10 +434,8 @@ class FaceTracker:
         self.model = YOLO(model_path)
         self.conf_threshold = conf_threshold
         
-        # Initialisation du drone Tello
         print("Connexion au drone Tello...")
         
-        # Vérifier la connectivité réseau avant de se connecter
         import socket
         tello_ip = "192.168.10.1"
         tello_port = 8889
@@ -456,7 +454,6 @@ class FaceTracker:
         
         self.tello = Tello(host=tello_ip)
         
-        # Tentative de connexion avec gestion d'erreur améliorée
         try:
             print("Tentative de connexion au Tello...")
             self.tello.connect()
@@ -469,7 +466,6 @@ class FaceTracker:
                 self.wifi_manager.cleanup()
             sys.exit(1)
         
-        # Vérification de la batterie
         try:
             battery = self.tello.get_battery()
             print(f"Niveau de batterie: {battery}%")
@@ -508,7 +504,6 @@ class FaceTracker:
                     try:
                         cap = cv2.VideoCapture(fmt, cv2.CAP_FFMPEG)
                         if cap.isOpened():
-                            # Tester en lisant une frame
                             ret, test_frame = cap.read()
                             if ret and test_frame is not None:
                                 print(f"✓ Flux vidéo ouvert avec le format: {fmt}")
@@ -523,12 +518,9 @@ class FaceTracker:
                         continue
                 
                 if cap and cap.isOpened():
-                    # OPTIMISATION : Utiliser un thread pour lire les frames en arrière-plan
-                    # Cela évite les appels bloquants et améliore considérablement les performances
                     self.frame_read = WindowsFrameRead(cap)
-                    self._windows_video_cap = cap  # Garder une référence pour le cleanup
+                    self._windows_video_cap = cap
                 else:
-                    # Fallback : utiliser la méthode standard (peut échouer)
                     print("⚠ Tentative avec la méthode standard djitellopy...")
                     self.frame_read = self.tello.get_frame_read()
             else:
@@ -1030,14 +1022,6 @@ class FaceTracker:
                     # Aucun visage détecté - arrêter le mouvement
                     left_right, forward_backward, up_down, yaw = 0, 0, 0, 0
                     self.no_detection_count += 1
-                    
-                    # Si aucun visage détecté pendant trop longtemps, atterrir
-                    #if self.no_detection_count > self.max_no_detection and is_flying:
-                    #    print("Aucun visage detecte depuis trop longtemps. Atterrissage...")
-                    #    self.tello.send_rc_control(0, 0, 0, 0)
-                    #    time.sleep(1)
-                    #    self.tello.land()
-                    #    is_flying = False
                 
                 # Application des commandes si le drone vole
                 if is_flying:

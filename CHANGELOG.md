@@ -1,12 +1,13 @@
-# Changelog - Déploiement Windows
+# Changelog
 
-Historique des modifications pour l'adaptation Windows du projet Tello Face Tracking.
+Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
----
+Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
+et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-11-27
+## [1.0.0] - 2024-12-XX
 
-### ✨ Nouveautés
+### ✨ Ajouté
 
 #### Support Windows natif
 - Détection automatique de la plateforme (Windows/Linux)
@@ -22,11 +23,11 @@ Historique des modifications pour l'adaptation Windows du projet Tello Face Trac
 - Messages d'erreur clairs et guidage pas à pas
 
 #### Documentation complète
-- **README_WINDOWS.md** : Guide complet pour utilisateurs Windows (20+ pages)
+- **README_WINDOWS.md** : Guide complet pour utilisateurs Windows
   - Installation détaillée
   - Configuration WiFi pas à pas
   - Guide d'utilisation illustré
-  - Dépannage exhaustif (10+ problèmes)
+  - Dépannage exhaustif
   - FAQ et conseils de sécurité
   
 - **BUILD_INSTRUCTIONS.md** : Guide technique pour développeurs
@@ -35,26 +36,19 @@ Historique des modifications pour l'adaptation Windows du projet Tello Face Trac
   - Optimisations (taille, performance)
   - Distribution et packaging
   - CI/CD avec GitHub Actions
-  
-- **DEPLOIEMENT_WINDOWS.txt** : Résumé de l'implémentation
-- **QUICK_START_WINDOWS.md** : Démarrage rapide
-- **CHANGELOG_WINDOWS.md** : Ce fichier
 
-### 🔧 Modifications techniques
+### 🔧 Modifié
 
 #### Code source
 - **tello_face_tracking.py** :
-  - Ajout de `import platform`
-  - Détection automatique de Windows dans `FaceTracker.__init__()`
+  - Ajout de la détection automatique de Windows
   - Désactivation de `auto_wifi` si Windows détecté
   - Message informatif pour la connexion WiFi manuelle
 
 - **gui/tello_gui.py** :
-  - Ajout de `import platform`
   - Détection Windows dans la configuration par défaut
-  - Message d'avertissement dans l'interface (label orange)
+  - Message d'avertissement dans l'interface
   - Désactivation de la checkbox "WiFi automatique" sous Windows
-  - Tooltip explicatif ajouté
 
 #### Configuration PyInstaller
 - **tello_face_tracking.spec** :
@@ -65,7 +59,6 @@ Historique des modifications pour l'adaptation Windows du projet Tello Face Trac
 #### Git
 - **.gitignore** :
   - Ajout de `build/` et `dist/` (artefacts PyInstaller)
-  - Clarification des commentaires
 
 ### ✅ Compatibilité préservée
 
@@ -87,9 +80,9 @@ Historique des modifications pour l'adaptation Windows du projet Tello Face Trac
 - ✅ Détection OS avec `platform.system()`
 - ✅ Maintenabilité préservée
 
-### 📦 Fichiers de distribution
+### 📦 Distribution
 
-#### Créés automatiquement par `build_windows.py`
+#### Fichiers créés automatiquement par `build_windows.py`
 - `dist/TelloFaceTracking.exe` - Application principale (~200-350 MB)
 - `dist/LISEZMOI.txt` - Instructions courtes pour l'utilisateur
 - `dist/BUILD_INFO.txt` - Informations de build (date, version, système)
@@ -109,55 +102,6 @@ Historique des modifications pour l'adaptation Windows du projet Tello Face Trac
 #### Avec PyTorch CUDA
 - **500-800 MB** - Inclut CUDA (non recommandé pour cette application)
 
-### 🐛 Corrections
-
-Aucune correction de bug dans cette version (nouvelle fonctionnalité).
-
-### ⚠️ Notes de migration
-
-#### Pour les développeurs
-
-**Aucune migration nécessaire !**
-
-- Le code Linux existant fonctionne sans modification
-- Les nouveaux fichiers sont additionnels
-- Aucun changement de l'API ou des interfaces
-
-#### Pour les utilisateurs Linux
-
-**Aucun changement !**
-
-- Utilisez le projet comme d'habitude
-- La gestion WiFi automatique fonctionne toujours
-- README.md original reste la référence
-
-#### Pour les nouveaux utilisateurs Windows
-
-- Suivez `README_WINDOWS.md` pour l'installation
-- Téléchargez l'exécutable depuis les releases
-- Placez `yolov8n-face.pt` à côté de l'exécutable
-- Connectez-vous manuellement au WiFi du Tello
-
-### 🔮 Évolutions futures possibles
-
-#### Court terme
-- [ ] Icône personnalisée pour l'exécutable Windows
-- [ ] Installateur Windows avec Inno Setup
-- [ ] Signature de code pour éviter les avertissements Windows Defender
-- [ ] GitHub Actions pour build automatique
-
-#### Moyen terme
-- [ ] Support macOS (si demande)
-- [ ] Gestion WiFi automatique Windows (avec netsh)
-- [ ] Mode portable (exécutable unique sans dépendances externes)
-- [ ] Multi-langue (anglais, français, etc.)
-
-#### Long terme
-- [ ] Store Windows (Microsoft Store)
-- [ ] Auto-mise à jour de l'application
-- [ ] Téléchargement automatique du modèle YOLO
-- [ ] Installateur MSI professionnel
-
 ### 📊 Statistiques
 
 #### Lignes de code ajoutées/modifiées
@@ -174,19 +118,11 @@ Aucune correction de bug dans cette version (nouvelle fonctionnalité).
 - **100%** compatible avec le code Linux existant
 - **0** régression détectée
 
-### 🙏 Remerciements
-
-- **Ultralytics** : YOLO et modèle de détection
-- **djitellopy** : Bibliothèque de contrôle Tello
-- **PyInstaller** : Création d'exécutables
-- **PyQt6** : Interface graphique
-
 ---
 
 ## Format de versioning
 
 Ce projet suit le [Semantic Versioning](https://semver.org/) :
-
 - **MAJOR** : Changements incompatibles de l'API
 - **MINOR** : Nouvelles fonctionnalités compatibles
 - **PATCH** : Corrections de bugs
@@ -197,11 +133,11 @@ Ce projet suit le [Semantic Versioning](https://semver.org/) :
 
 ## Comment contribuer
 
-Si vous souhaitez améliorer le support Windows :
+Si vous souhaitez améliorer le projet :
 
 1. Consultez `BUILD_INSTRUCTIONS.md` pour comprendre le build
-2. Testez sur différentes versions de Windows
-3. Signalez les problèmes spécifiques à Windows
+2. Testez sur différentes plateformes (Linux, Windows)
+3. Signalez les problèmes via les issues GitHub
 4. Proposez des améliorations de la documentation
 
 ---

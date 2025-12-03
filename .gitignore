@@ -147,6 +147,12 @@ installer/
 *.exe
 !yolov8n-face.pt
 
+# Fichiers de release
+TelloFaceTracking-v*.zip
+TelloFaceTracking-v*.sha256
+*.zip
+*.sha256
+
 # Neural Network weights -----------------------------------------------------------------------------------------------
 weights/
 *.weights

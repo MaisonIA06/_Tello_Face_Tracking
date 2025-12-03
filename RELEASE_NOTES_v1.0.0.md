@@ -1,9 +1,5 @@
 # Tello Face Tracking v1.0.0 - Windows Release
 
-> **Template de release notes** - Copiez ce contenu lors de la création d'une release GitHub
-
----
-
 ## 🎉 Première release Windows !
 
 Tello Face Tracking est maintenant disponible pour **Windows** avec un exécutable autonome facile à utiliser.
@@ -15,26 +11,27 @@ Tello Face Tracking est maintenant disponible pour **Windows** avec un exécutab
 - ✅ **Guide complet** : Documentation détaillée pour débutants
 - ✅ **Interface graphique** : PyQt6 moderne et intuitive
 - ✅ **Détection automatique** : YOLO-face pour tracking précis
+- ✅ **Support multiplateforme** : Linux (code source) et Windows (exécutable)
 
 ### 📦 Téléchargements
 
 | Fichier | Taille | Description |
 |---------|--------|-------------|
-| **TelloFaceTracking-v1.0.0-Windows.zip** | ~250 MB | Application complète (exécutable + modèle) |
-| **yolov8n-face.pt** | ~6 MB | Modèle de détection (si séparé) |
+| **TelloFaceTracking-v1.0.0-Windows-x64.zip** | ~250 MB | Application complète (exécutable + dépendances) |
+| **yolov8n-face.pt** | ~6 MB | Modèle de détection (inclus ou séparé selon le ZIP) |
 | **README_WINDOWS.md** | - | Guide d'utilisation complet |
 
-> ⚠️ **Important** : Téléchargez TOUS les fichiers nécessaires
+> ⚠️ **Important** : Assurez-vous d'avoir le modèle YOLO (`yolov8n-face.pt`) dans le même dossier que l'exécutable
 
 ### 🚀 Installation rapide
 
-1. **Télécharger** `TelloFaceTracking-v1.0.0-Windows.zip`
+1. **Télécharger** `TelloFaceTracking-v1.0.0-Windows-x64.zip`
 2. **Extraire** l'archive dans un dossier
-3. **Placer** le fichier `yolov8n-face.pt` dans le même dossier que l'exécutable
+3. **Placer** le fichier `yolov8n-face.pt` dans le même dossier que l'exécutable (si non inclus)
 4. **Connecter** au WiFi du drone Tello (réseau TELLO-XXXXXX)
 5. **Lancer** `TelloFaceTracking.exe`
 
-📖 **Guide complet** : Voir [README_WINDOWS.md](./README_WINDOWS.md)
+📖 **Guide complet** : Voir [README_WINDOWS.md](README_WINDOWS.md)
 
 ### 📋 Prérequis
 
@@ -67,6 +64,7 @@ Tello Face Tracking est maintenant disponible pour **Windows** avec un exécutab
 - Le pare-feu Windows peut demander une autorisation au premier lancement (normal)
 - Sur Windows 7, certaines animations de l'interface peuvent être lentes
 - Le drone doit être à moins de 10 mètres pour une connexion stable
+- La gestion WiFi automatique n'est pas disponible sous Windows (connexion manuelle requise)
 
 ### 🔧 Dépannage
 
@@ -74,12 +72,12 @@ Tello Face Tracking est maintenant disponible pour **Windows** avec un exécutab
 → Vérifiez que `yolov8n-face.pt` est dans le même dossier que l'exécutable
 
 **Problème** : "Impossible de se connecter au drone"
-→ Vérifiez que vous êtes connecté au WiFi TELLO-XXXXXX
+→ Vérifiez que vous êtes connecté au WiFi TELLO-XXXXXX avant de lancer l'application
 
 **Problème** : Pas de flux vidéo
 → Attendez 5-10 secondes après avoir cliqué sur "Démarrer"
 
-📖 **Guide de dépannage complet** : Voir [README_WINDOWS.md](./README_WINDOWS.md#dépannage)
+📖 **Guide de dépannage complet** : Voir [README_WINDOWS.md](README_WINDOWS.md#dépannage)
 
 ### 📝 Notes importantes
 
@@ -87,26 +85,27 @@ Tello Face Tracking est maintenant disponible pour **Windows** avec un exécutab
 Cette release est spécifique à Windows. Les utilisateurs Linux peuvent continuer à utiliser le code source Python directement avec les fonctionnalités natives (gestion WiFi automatique incluse).
 
 #### À propos du modèle YOLO
-Le modèle `yolov8n-face.pt` est fourni séparément pour :
+Le modèle `yolov8n-face.pt` peut être fourni séparément pour :
 - Réduire la taille de téléchargement
 - Permettre des mises à jour indépendantes
 - Respecter les licences
 
 ### 📚 Documentation
 
-- **[README_WINDOWS.md](./README_WINDOWS.md)** - Guide complet utilisateur Windows
-- **[BUILD_INSTRUCTIONS.md](./BUILD_INSTRUCTIONS.md)** - Guide pour développeurs
-- **[CHANGELOG.md](./CHANGELOG.md)** - Historique des modifications
+- **[README.md](README.md)** - Documentation principale du projet
+- **[README_WINDOWS.md](README_WINDOWS.md)** - Guide complet utilisateur Windows
+- **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** - Guide pour développeurs
+- **[CHANGELOG.md](CHANGELOG.md)** - Historique des modifications
 
 ### 🤝 Contribution
 
 Vous avez trouvé un bug ? Une suggestion d'amélioration ?
 - Ouvrez une [issue](../../issues)
-- Consultez le [guide de contribution](./CONTRIBUTING.md) (si existant)
+- Consultez le guide de contribution dans le README
 
 ### 📄 Licence
 
-Ce projet utilise la licence **GPL-3.0**.
+Ce projet utilise la licence **GPL-3.0**. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
 
 Le modèle YOLO-face est sous licence GPL-3.0 également.
 
@@ -120,38 +119,14 @@ Le modèle YOLO-face est sous licence GPL-3.0 également.
 
 ---
 
-## 📸 Captures d'écran
-
-> ℹ️ Ajoutez des captures d'écran ici lors de la publication
-
-![Interface principale](./docs/screenshots/main-interface.png)
-![Tracking en action](./docs/screenshots/tracking.png)
-![Paramètres avancés](./docs/screenshots/settings.png)
-
----
-
 ## 🔐 Checksums (SHA256)
 
-> ℹ️ Générez et ajoutez les checksums lors de la publication
+> ⚠️ Les checksums seront générés automatiquement par le script `create_release.py`
 
-```
-TelloFaceTracking.exe: [checksum]
-yolov8n-face.pt: [checksum]
-```
-
-Pour vérifier :
+Pour vérifier l'intégrité du fichier téléchargé :
 ```powershell
-Get-FileHash TelloFaceTracking.exe -Algorithm SHA256
+Get-FileHash TelloFaceTracking-v1.0.0-Windows-x64.zip -Algorithm SHA256
 ```
-
----
-
-## 📞 Support
-
-**Questions ?** Consultez d'abord :
-1. [README_WINDOWS.md](./README_WINDOWS.md) - Guide complet
-2. [Issues](../../issues) - Problèmes connus et solutions
-3. [Discussions](../../discussions) - Forum communautaire
 
 ---
 
@@ -171,6 +146,6 @@ Get-FileHash TelloFaceTracking.exe -Algorithm SHA256
 
 ---
 
-*Release créée le : [DATE]*
+*Release créée le : 2024-12-XX*  
 *Testé sur : Windows 10 22H2, Windows 11 23H2*
 

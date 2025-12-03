@@ -1,0 +1,83 @@
+name: Build and Release Windows
+
+on:
+  # Déclencher sur les tags de version
+  push:
+    tags:
+      - 'v*'
+  
+  # Permettre le déclenchement manuel
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build:
+    name: Build Windows Executable
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Run build script
+      run: python build_windows.py
+      
+    - name: Verify build
+      run: |
+        if (Test-Path dist/TelloFaceTracking.exe) {
+          Write-Host "✓ Executable created successfully"
+          $size = (Get-Item dist/TelloFaceTracking.exe).Length / 1MB
+          Write-Host "Size: $($size) MB"
+        } else {
+          Write-Error "❌ Executable not found"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: Create release package
+      run: |
+        $version = "${{ github.ref_name }}" -replace 'v',''
+        if ([string]::IsNullOrEmpty($version)) {
+          $version = "${{ inputs.version }}"
+        }
+        python create_release.py $version
+      shell: pwsh
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TelloFaceTracking-Windows
+        path: |
+          TelloFaceTracking-v*.zip
+          TelloFaceTracking-v*.sha256
+        retention-days: 30
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          TelloFaceTracking-v*.zip
+          TelloFaceTracking-v*.sha256
+        body_path: RELEASE_NOTES_TEMPLATE.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
